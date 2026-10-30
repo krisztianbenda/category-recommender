@@ -1,0 +1,25 @@
+# Secrets: never commit (Constitution, Principle II)
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+secrets/
+credentials/
+
+# Real personal data must live outside the repo; guard against accidents
+data/
+
+# Personal Claude Code overrides
+.claude/settings.local.json
+
+# Node.js
+node_modules/
+dist/
+coverage/
+*.log
+
+# OS
+.DS_Store
