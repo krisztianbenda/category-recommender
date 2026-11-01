@@ -6,7 +6,7 @@
 # After that, every download is verified against the recorded hash.
 #
 # URLs point at the publishers' GGUF repositories; verify the exact file names before pinning.
-qwen3-8b-instruct-q4_k_m.gguf UNPINNED https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf
-qwen3-4b-instruct-q4_k_m.gguf UNPINNED https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf
-gemma-3-4b-it-q4_k_m.gguf UNPINNED https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf
-bge-m3-q8_0.gguf UNPINNED https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q8_0.gguf
+qwen3-8b-instruct-q4_k_m.gguf d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785 https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf
+qwen3-4b-instruct-q4_k_m.gguf 7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5 https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf
+gemma-3-4b-it-q4_k_m.gguf 882e8d2db44dc554fb0ea5077cb7e4bc49e7342a1f0da57901c0802ea21a0863 https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf
+bge-m3-q8_0.gguf 950f4a8e5e19477a6d3c26d2f162233c20002c601f75e4b002e3239997821167 https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q8_0.gguf
