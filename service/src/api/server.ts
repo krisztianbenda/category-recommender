@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import type { AppContext } from "../context.js";
 import { registerAccessControl } from "../security/access.js";
+import { registerLocalAccess } from "../security/local.js";
 import { PathError } from "../categories/path.js";
 import { LlmOutputError, LlmUnavailableError, NonLocalEndpointError } from "../llm/client.js";
 import { AppError, envelope } from "./errors.js";
@@ -41,20 +42,25 @@ export function buildServer(
   webDir = WEB_DIR,
 ): FastifyInstance {
   const { tls } = ctx.config.server;
-  const app = Fastify({
-    logger: false, // our own redacting logger only
-    bodyLimit: 1024 * 1024,
-    https: {
-      key: fs.readFileSync(tls.keyFile),
-      cert: fs.readFileSync(tls.certFile),
-      ca: fs.readFileSync(tls.clientCaFile),
-      requestCert: true,
-      rejectUnauthorized: true,
-      minVersion: "TLSv1.2",
-    },
-  });
-
-  registerAccessControl(app, ctx.access);
+  const base = { logger: false, bodyLimit: 1024 * 1024 }; // our own redacting logger only
+  let app: FastifyInstance;
+  if (tls) {
+    app = Fastify({
+      ...base,
+      https: {
+        key: fs.readFileSync(tls.keyFile),
+        cert: fs.readFileSync(tls.certFile),
+        ca: fs.readFileSync(tls.clientCaFile),
+        requestCert: true,
+        rejectUnauthorized: true,
+        minVersion: "TLSv1.2",
+      },
+    });
+    registerAccessControl(app, ctx.access);
+  } else {
+    app = Fastify(base);
+    registerLocalAccess(app);
+  }
 
   app.addHook("onResponse", async (request, reply) => {
     ctx.logger.info(

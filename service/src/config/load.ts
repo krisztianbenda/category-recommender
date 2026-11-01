@@ -72,7 +72,7 @@ export function checkHostRules(config: Config, opts: LoadOptions = {}): void {
     problems.push("embeddings.baseUrl must be a loopback address");
   }
   const secrets: [string, string | null][] = [
-    ["server.tls.keyFile", config.server.tls.keyFile],
+    ["server.tls.keyFile", config.server.tls?.keyFile ?? null],
     ["storage.sqlcipherKeyFile", config.storage.sqlcipherKeyFile],
   ];
   for (const [key, file] of secrets) {

@@ -448,3 +448,4 @@ Task: "T045 Decisions repository in service/src/store/repos/decisions.ts"
 - **Model checksums are pinned on first download** (`scripts/fetch-models.sh --pin` writes `scripts/models.lock`). All entries are `UNPINNED` until that first run.
 - **Log rotation (T071)** was built together with the logger in T011.
 - **Moved to Node.js 24 LTS (2026-11-01)**. Node 22 leaves support on 2027-04-30. `engines` is now `>=24.18 <25`, `@types/node` is 24.19.2, and `.nvmrc` pins 24. T002 above records the original setup.
+- **Local mode added (2026-11-01)**, at the owner's request; allowed by constitution v3.0.0 (Principle III, staged access control). With no `server.tls`, the service runs as the current user on plain HTTP at `127.0.0.1` with a Host-header guard, and no device certificates or `catrec` user. Started by `scripts/run-local.sh`. The mTLS/launchd/pf setup stays in the repo for a later LAN deployment.

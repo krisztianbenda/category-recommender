@@ -62,3 +62,6 @@ On startup, the service validates the file and refuses to start if any of these 
 - `llm.baseUrl` or `embeddings.baseUrl` is not loopback or allowlisted.
 - `storage.encryption = filevault` and FileVault is off.
 - A referenced secret file is world-readable.
+- `server.tls` is not set and `server.bindAddress` is not `127.0.0.1`, `::1` or `localhost`.
+
+**Local mode** (added 2026-11-01): when `server.tls` is absent or `null`, the service serves plain HTTP on the loopback address for a single user, `owner`. `access.devices` is ignored and not watched. Only requests whose `Host` is `127.0.0.1`, `localhost` or `[::1]` with the listening port are accepted (DNS-rebinding guard). Template: `deploy/local/config.yaml.template`.

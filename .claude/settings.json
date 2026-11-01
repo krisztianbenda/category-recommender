@@ -22,14 +22,14 @@
       "Read(**/*.age)",
       "Read(**/eval-report.md)",
       "Read(**/.catrec/**)",
-      "Read(//Users/catrec/**)",
+      "Read(~/.catrec/**)",
       "Edit(**/*.db)",
       "Edit(**/*.db-wal)",
       "Edit(**/*.db-shm)",
       "Edit(**/*.age)",
       "Edit(**/*.p12)",
       "Edit(**/eval-report.md)",
-      "Edit(//Users/catrec/**)"
+      "Edit(~/.catrec/**)"
     ]
   }
 }

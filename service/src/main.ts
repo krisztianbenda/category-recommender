@@ -16,7 +16,10 @@ async function main(): Promise<void> {
   });
   const app = await createApp(config, { logger, configFile });
   await app.listen();
-  logger.info({ count: app.ctx.access.size }, "catrec service listening");
+  logger.info(
+    { count: config.server.tls ? app.ctx.access.size : 0 },
+    config.server.tls ? "catrec service listening" : "catrec service listening (local mode)",
+  );
 
   const shutdown = async () => {
     await app.close();

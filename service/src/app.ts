@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { Config } from "./config/schema.js";
+import { LOCAL_USER, type Config } from "./config/schema.js";
 import { AccessList, watchAccessList, type WatchHandle } from "./config/watch.js";
 import type { AppContext } from "./context.js";
 import { EmbeddingsClient, LlmClient } from "./llm/client.js";
@@ -53,7 +53,9 @@ export function createContext(config: Config, logger: Logger): AppContext {
   const db = openDb(dbFileFor(config.storage.dataDir));
   migrate(db);
   const categories = new CategoryRepo(db);
-  const users = new Set(config.access.devices.map((d) => d.user));
+  const users = config.server.tls
+    ? new Set(config.access.devices.map((d) => d.user))
+    : new Set([LOCAL_USER]);
   for (const user of users) {
     categories.ensureUser(user);
     categories.getOrCreateDefaultSet(user);
@@ -133,7 +135,7 @@ export async function createApp(config: Config, opts: AppOptions): Promise<App> 
   const server = buildServer(ctx, routeModules);
   ctx.pending.start();
   let watcher: WatchHandle | undefined;
-  if (opts.configFile) {
+  if (opts.configFile && config.server.tls) {
     watcher = watchAccessList(
       opts.configFile,
       ctx.access,

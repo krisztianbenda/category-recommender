@@ -9,12 +9,18 @@ export interface DeviceEntry {
   user: string;
 }
 
+/** The only user in local mode (no TLS, no device allowlist). */
+export const LOCAL_USER = "owner";
+
+const LOOPBACK_BIND = new Set(["127.0.0.1", "::1", "localhost"]);
+
 export interface Config {
   version: 1;
   server: {
     bindAddress: string;
     port: number;
-    tls: { certFile: string; keyFile: string; clientCaFile: string };
+    /** null = local mode: plain HTTP on a loopback address, single owner, no device certs. */
+    tls: { certFile: string; keyFile: string; clientCaFile: string } | null;
   };
   access: { devices: DeviceEntry[] };
   storage: { dataDir: string; encryption: EncryptionMode; sqlcipherKeyFile: string | null };
@@ -154,6 +160,7 @@ export function validateConfig(raw: unknown): Config {
   if (raw.version !== 1) r.problems.push("version must be 1");
 
   const server = r.obj(raw, "server", "server");
+  const localMode = server.tls === undefined || server.tls === null;
   const tls = r.obj(server, "tls", "server.tls");
   const access = r.obj(raw, "access", "access");
   const storage = r.obj(raw, "storage", "storage");
@@ -171,11 +178,13 @@ export function validateConfig(raw: unknown): Config {
     server: {
       bindAddress: r.str(server, "bindAddress", "server.bindAddress"),
       port: r.num(server, "port", "server.port", 8443, 1, 65535),
-      tls: {
-        certFile: r.str(tls, "certFile", "server.tls.certFile"),
-        keyFile: r.str(tls, "keyFile", "server.tls.keyFile"),
-        clientCaFile: r.str(tls, "clientCaFile", "server.tls.clientCaFile"),
-      },
+      tls: localMode
+        ? null
+        : {
+            certFile: r.str(tls, "certFile", "server.tls.certFile"),
+            keyFile: r.str(tls, "keyFile", "server.tls.keyFile"),
+            clientCaFile: r.str(tls, "clientCaFile", "server.tls.clientCaFile"),
+          },
     },
     access: { devices: parseDevices(access.devices, r.problems) },
     storage: {
@@ -261,6 +270,11 @@ export function validateConfig(raw: unknown): Config {
 
   if (config.storage.encryption === "sqlcipher" && !config.storage.sqlcipherKeyFile) {
     r.problems.push("storage.sqlcipherKeyFile is required when storage.encryption is sqlcipher");
+  }
+  if (localMode && !LOOPBACK_BIND.has(config.server.bindAddress)) {
+    r.problems.push(
+      "server.bindAddress must be 127.0.0.1, ::1 or localhost when server.tls is not set",
+    );
   }
   if (r.problems.length) throw new ConfigError(r.problems);
   return config;

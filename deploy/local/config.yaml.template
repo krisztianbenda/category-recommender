@@ -1,0 +1,33 @@
+# catrec local-mode configuration, created by scripts/run-local.sh.
+# Contract: specs/001-local-llm-categorizer/contracts/config.md
+# Local mode: no server.tls, so the service speaks plain HTTP on 127.0.0.1 for one owner.
+# To expose it on the network later, add server.tls and access.devices (see deploy/config.example.yaml).
+version: 1
+
+server:
+  bindAddress: 127.0.0.1 # loopback only; required while server.tls is not set
+  port: 8080
+
+storage:
+  dataDir: __HOME__/.catrec/data # must be outside the repo
+  encryption: filevault # filevault | external-volume
+
+llm:
+  baseUrl: http://127.0.0.1:8081/v1
+  model: __LLM_ALIAS__
+  maxEmailTokens: 1500
+  requestTimeoutSeconds: 30
+
+embeddings:
+  baseUrl: http://127.0.0.1:8082/v1
+  model: bge-m3-q8_0
+
+suggestions:
+  ttlSeconds: 3600
+
+logging:
+  level: info
+  retentionDays: 14
+
+backup:
+  ageRecipient: null # set to your public age key to use `catrec backup`

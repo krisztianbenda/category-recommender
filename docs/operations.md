@@ -4,6 +4,56 @@ How to install, run, maintain and move the category recommender on the home serv
 
 **Golden rule (constitution I and II):** real emails and the data directory never go into the repository, a test, an issue or an AI assistant. Use the synthetic fixtures for anything you debug with help.
 
+## Local mode (current setup)
+
+Runs on this computer as your own user. It uses plain HTTP on `127.0.0.1` only, with no service user, certificates or firewall rules. Nothing else on the network can reach it.
+
+Prerequisites: `brew install llama.cpp node@24`. Models are in `/opt/catrec/models` (`scripts/fetch-models.sh`).
+
+**Start** (Ctrl+C stops the service and both model servers):
+
+```bash
+scripts/run-local.sh
+```
+
+Then open <http://127.0.0.1:8080/>. To use the smaller model, add `--llm-file qwen3-4b-instruct-q4_k_m.gguf`, and set `llm.model` in the config to match.
+
+| What | Where |
+|------|-------|
+| Config (created on first run) | `~/.catrec/config.yaml` |
+| Data (SQLite + service logs) | `~/.catrec/data/` |
+| Model server logs | `~/.catrec/logs/` |
+
+**Evaluation**: start the service as above, then in a second terminal:
+
+```bash
+cd service && CATREC_CONFIG=~/.catrec/config.yaml npm run eval -- --suite reference,novel,injection,habits --report ../eval-report.md
+```
+
+**Delete everything learned**: Learned data → Delete all my data in the UI, or stop the service and `rm -rf ~/.catrec/data`.
+
+### Removing the hardened setup
+
+If you installed the launchd/`catrec` setup described below, remove it before using local mode. Local mode needs ports 8080–8082 free.
+
+```bash
+for u in service embeddings llm pf; do sudo launchctl bootout system /Library/LaunchDaemons/com.catrec.$u.plist; sudo rm -f /Library/LaunchDaemons/com.catrec.$u.plist; done
+```
+
+```bash
+sudo sed -i '' '/anchor "catrec"/d' /etc/pf.conf && sudo rm -f /etc/pf.anchors/catrec && sudo pfctl -f /etc/pf.conf
+```
+
+```bash
+sudo rm -rf /opt/catrec/service /var/log/catrec && sudo sysadminctl -deleteUser catrec
+```
+
+`-deleteUser` also deletes `/Users/catrec`, which holds the certificates, config and data. Keep `/opt/catrec/models`, because local mode uses it.
+
+## Hardened LAN setup (later)
+
+The rest of this guide covers a separate install for use from other devices on your network. It uses a non-admin `catrec` service user, device certificates (mTLS) and pf egress rules. You don't need it for local mode.
+
 ## Layout on the Mac Mini
 
 | What | Where | Owner / mode |
