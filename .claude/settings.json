@@ -15,7 +15,21 @@
       "Edit(**/.env.*)",
       "Edit(**/secrets/**)",
       "Edit(**/credentials/**)",
-      "Edit(**/data/**)"
+      "Edit(**/data/**)",
+      "Read(**/*.db)",
+      "Read(**/*.db-wal)",
+      "Read(**/*.db-shm)",
+      "Read(**/*.age)",
+      "Read(**/eval-report.md)",
+      "Read(**/.catrec/**)",
+      "Read(//Users/catrec/**)",
+      "Edit(**/*.db)",
+      "Edit(**/*.db-wal)",
+      "Edit(**/*.db-shm)",
+      "Edit(**/*.age)",
+      "Edit(**/*.p12)",
+      "Edit(**/eval-report.md)",
+      "Edit(//Users/catrec/**)"
     ]
   }
 }

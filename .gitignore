@@ -23,3 +23,15 @@ coverage/
 
 # OS
 .DS_Store
+
+# Local runtime artefacts (Constitution, Principles I and II)
+*.db
+*.db-wal
+*.db-shm
+*.age
+models/
+*.gguf
+eval-report.md
+build/
+*.tmp
+*.swp
