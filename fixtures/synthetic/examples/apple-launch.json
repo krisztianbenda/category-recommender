@@ -1,0 +1,10 @@
+{
+  "email": {
+    "from": "Apple <news@apple.example.test>",
+    "to": ["me@example.test"],
+    "subject": "Introducing the all-new iPhone. Pre-order today.",
+    "body": "Meet the newest iPhone, with a faster chip, a brighter display and our best camera system yet. Pre-orders open Friday, with deliveries starting next week. Trade in your current device and save on your upgrade."
+  },
+  "categories": ["Family", "Gadgets", "Finance"],
+  "expected": { "category": "Gadgets" }
+}

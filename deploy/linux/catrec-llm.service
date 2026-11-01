@@ -1,0 +1,18 @@
+[Unit]
+Description=catrec generation model (llama-server, loopback only)
+After=network.target
+
+[Service]
+User=catrec
+ExecStart=/usr/local/bin/llama-server --host 127.0.0.1 --port 8081 --model /opt/catrec/models/qwen3-8b-instruct-q4_k_m.gguf --alias qwen3-8b-instruct-q4_k_m --ctx-size 8192 --parallel 1 --n-gpu-layers 999 --no-webui
+Restart=on-failure
+# Defence in depth on top of nftables: loopback only.
+IPAddressDeny=any
+IPAddressAllow=localhost
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

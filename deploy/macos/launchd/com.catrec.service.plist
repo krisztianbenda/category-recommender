@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The catrec HTTPS service (mTLS, LAN only). Filled in by setup.sh. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.catrec.service</string>
+  <key>UserName</key><string>catrec</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__SERVICE_DIR__/dist/src/main.js</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CATREC_CONFIG</key><string>__CONFIG__</string>
+    <key>NODE_ENV</key><string>production</string>
+  </dict>
+  <key>WorkingDirectory</key><string>__SERVICE_DIR__</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>/var/log/catrec/service.err</string>
+  <key>StandardOutPath</key><string>/dev/null</string>
+</dict>
+</plist>

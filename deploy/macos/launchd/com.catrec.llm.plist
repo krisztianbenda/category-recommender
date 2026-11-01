@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Generation model: llama-server on loopback, one slot (research R2). Filled in by setup.sh. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.catrec.llm</string>
+  <key>UserName</key><string>catrec</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__LLAMA_SERVER__</string>
+    <string>--host</string><string>127.0.0.1</string>
+    <string>--port</string><string>8081</string>
+    <string>--model</string><string>__MODELS_DIR__/__LLM_FILE__</string>
+    <string>--alias</string><string>__LLM_ALIAS__</string>
+    <string>--ctx-size</string><string>8192</string>
+    <string>--parallel</string><string>1</string>
+    <string>--n-gpu-layers</string><string>999</string>
+    <string>--no-webui</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>/var/log/catrec/llm.log</string>
+  <key>StandardOutPath</key><string>/dev/null</string>
+</dict>
+</plist>

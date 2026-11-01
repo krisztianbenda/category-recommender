@@ -1,0 +1,12 @@
+# Pinned model files for scripts/fetch-models.sh.
+# Format: <file name> <sha256 or UNPINNED> <url>
+#
+# Checksums are pinned on first download with `scripts/fetch-models.sh --pin` (trust on first
+# use): review the printed hashes against the publisher's page, then commit this file.
+# After that, every download is verified against the recorded hash.
+#
+# URLs point at the publishers' GGUF repositories; verify the exact file names before pinning.
+qwen3-8b-instruct-q4_k_m.gguf UNPINNED https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf
+qwen3-4b-instruct-q4_k_m.gguf UNPINNED https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf
+gemma-3-4b-it-q4_k_m.gguf UNPINNED https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf
+bge-m3-q8_0.gguf UNPINNED https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q8_0.gguf

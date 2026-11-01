@@ -1,0 +1,10 @@
+{
+  "email": {
+    "from": "Booking Desk <confirmations@travel.example.test>",
+    "to": ["me@example.test"],
+    "subject": "Your booking is confirmed: Lisbon, 12–16 May",
+    "body": "Thank you for your reservation. Hotel Miradouro, Lisbon. Check-in 12 May from 15:00, check-out 16 May by 11:00. Two adults, breakfast included. Your confirmation number is EX-482913."
+  },
+  "categories": ["Travelling", "Travelling/TripXYZ", "Family"],
+  "expected": { "newParent": "Travelling" }
+}

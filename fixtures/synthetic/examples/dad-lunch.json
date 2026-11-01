@@ -1,0 +1,10 @@
+{
+  "email": {
+    "from": "Dad <dad@example.test>",
+    "to": ["me@example.test"],
+    "subject": "Family lunch on Sunday",
+    "body": "Hi kiddo,\n\nGrandma is turning 80, so the whole family is getting together at our place on Sunday at noon. Your aunt and the cousins are coming too. Could you bring a dessert? Let me know if you can make it.\n\nLove,\nDad"
+  },
+  "categories": ["Family", "Gadgets", "Finance"],
+  "expected": { "category": "Family" }
+}

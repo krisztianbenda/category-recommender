@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Category Recommender</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <strong>Category Recommender</strong>
+      <nav>
+        <a href="/" aria-current="page">Suggest</a>
+        <a href="/sets.html">Category sets</a>
+        <a href="/learned.html">Learned data</a>
+      </nav>
+    </header>
+
+    <main class="grid">
+      <form id="suggest-form" class="card" autocomplete="off">
+        <h1>Suggest a category</h1>
+        <label>From <input name="from" required placeholder="Sender name &lt;address&gt;" /></label>
+        <label>Subject <input name="subject" /></label>
+        <label>Body <textarea name="body" rows="10"></textarea></label>
+
+        <fieldset>
+          <legend>Categories</legend>
+          <label class="inline"
+            ><input type="radio" name="source" value="list" checked /> Type a list</label
+          >
+          <label class="inline"
+            ><input type="radio" name="source" value="set" /> Use a saved set</label
+          >
+          <label id="list-field"
+            >One per line, at most two levels (Parent/Child)
+            <textarea
+              name="categories"
+              rows="5"
+              placeholder="Family&#10;Family/Baby&#10;Gadgets"
+            ></textarea>
+          </label>
+          <label id="set-field" hidden
+            >Saved set
+            <select name="setId"></select
+          ></label>
+        </fieldset>
+
+        <button type="submit">Suggest</button>
+        <p id="form-error" class="error" role="alert"></p>
+      </form>
+
+      <section id="result" class="card" hidden aria-live="polite">
+        <h2>Suggestion</h2>
+        <p class="choice">
+          <span id="r-category" class="category"></span>
+          <span id="r-new" class="badge new" hidden>NEW</span>
+          <span id="r-confidence" class="badge"></span>
+        </p>
+        <p id="r-reason" class="reason"></p>
+        <p id="r-truncated" class="muted" hidden>
+          The email was long, so only its beginning was used.
+        </p>
+        <p id="r-similar" class="muted"></p>
+
+        <div id="new-category" hidden>
+          <label>New category name <input id="new-name" maxlength="60" /></label>
+          <p class="muted">Parent: <span id="new-parent"></span></p>
+        </div>
+
+        <div class="actions">
+          <button id="confirm" type="button">Confirm</button>
+        </div>
+
+        <h3>Or choose another</h3>
+        <ul id="r-runners" class="runners"></ul>
+        <p id="feedback-status" role="status"></p>
+      </section>
+
+      <section id="stats" class="card">
+        <h2>Accuracy</h2>
+        <p id="stats-text" class="muted">No decisions yet.</p>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

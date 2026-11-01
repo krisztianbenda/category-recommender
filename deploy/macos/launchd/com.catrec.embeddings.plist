@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Embedding model: llama-server in embedding mode on loopback (research R3). Filled in by setup.sh. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.catrec.embeddings</string>
+  <key>UserName</key><string>catrec</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__LLAMA_SERVER__</string>
+    <string>--host</string><string>127.0.0.1</string>
+    <string>--port</string><string>8082</string>
+    <string>--model</string><string>__MODELS_DIR__/__EMBED_FILE__</string>
+    <string>--alias</string><string>__EMBED_ALIAS__</string>
+    <string>--embedding</string>
+    <string>--pooling</string><string>cls</string>
+    <string>--ctx-size</string><string>8192</string>
+    <string>--n-gpu-layers</string><string>999</string>
+    <string>--no-webui</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>/var/log/catrec/embeddings.log</string>
+  <key>StandardOutPath</key><string>/dev/null</string>
+</dict>
+</plist>

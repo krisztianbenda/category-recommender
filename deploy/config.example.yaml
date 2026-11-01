@@ -1,0 +1,55 @@
+# catrec service configuration — PLACEHOLDER EXAMPLE ONLY.
+# Copy to a path outside the repository and point CATREC_CONFIG at it.
+# Contract: specs/001-local-llm-categorizer/contracts/config.md
+version: 1
+
+server:
+  bindAddress: 192.0.2.10 # your Mac Mini's LAN address (192.0.2.x is a documentation range)
+  port: 8443
+  tls:
+    certFile: /Users/catrec/.catrec/pki/server.crt
+    keyFile: /Users/catrec/.catrec/pki/server.key # secret, mode 600
+    clientCaFile: /Users/catrec/.catrec/pki/ca.crt
+
+access: # hot-reloaded allowlist; delete a line to revoke a device
+  devices:
+    - name: example-laptop
+      fingerprintSha256: "00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00"
+      user: owner
+
+storage:
+  dataDir: /Users/catrec/Library/Application Support/catrec # must be outside the repo
+  encryption: filevault # filevault | external-volume | sqlcipher
+  sqlcipherKeyFile: null # required iff encryption = sqlcipher (secret)
+
+llm:
+  baseUrl: http://127.0.0.1:8081/v1
+  model: qwen3-8b-instruct-q4_k_m
+  maxEmailTokens: 1500
+  requestTimeoutSeconds: 30
+
+embeddings:
+  baseUrl: http://127.0.0.1:8082/v1
+  model: bge-m3-q8_0
+
+learning:
+  neighbours: 8
+  fewShotExamples: 5
+  recencyHalfLifeDays: 180
+  minSimilarity: 0.5 # neighbours below this cosine similarity are ignored
+  confidence:
+    knnAgreeShare: 0.6
+  override: # past decisions win over the model when they agree this strongly
+    share: 0.75
+    minExamples: 3
+  newCategoryDuplicateSimilarity: 0.9
+
+suggestions:
+  ttlSeconds: 3600
+
+logging:
+  level: info
+  retentionDays: 14
+
+backup:
+  ageRecipient: "age1examplexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" # owner's public age key

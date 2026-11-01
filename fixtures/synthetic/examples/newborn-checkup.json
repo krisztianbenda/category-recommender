@@ -1,0 +1,10 @@
+{
+  "email": {
+    "from": "Aunt Kata <kata@example.test>",
+    "to": ["me@example.test"],
+    "subject": "Little Bence's first check-up went great",
+    "body": "Just wanted to tell you: we took the baby to the paediatrician for his one-month check-up today. He has gained weight nicely and is sleeping better at night. We're still looking for a good baby carrier, any tips?"
+  },
+  "categories": ["Family", "Family/Baby", "Gadgets"],
+  "expected": { "category": "Family/Baby" }
+}

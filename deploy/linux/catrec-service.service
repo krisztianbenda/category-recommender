@@ -1,0 +1,23 @@
+[Unit]
+Description=catrec category recommender (HTTPS + mTLS, LAN only)
+After=network-online.target catrec-llm.service catrec-embeddings.service
+Wants=network-online.target
+
+[Service]
+User=catrec
+Environment=CATREC_CONFIG=/var/lib/catrec/config.yaml
+Environment=NODE_ENV=production
+WorkingDirectory=/opt/catrec/service
+ExecStart=/usr/bin/node /opt/catrec/service/dist/src/main.js
+Restart=on-failure
+# Loopback plus private LAN ranges only (clients connect in; replies are allowed).
+IPAddressDeny=any
+IPAddressAllow=localhost 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/catrec
+
+[Install]
+WantedBy=multi-user.target
