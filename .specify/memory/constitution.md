@@ -12,16 +12,17 @@ stay on hardware the owner controls.
   or embedding APIs, no SaaS, no telemetry, analytics or crash reporting, and no remote logging.
 - All inference MUST run on local LLMs and models served by a runtime under the owner's control
   on the home network.
-- Services that touch personal data MUST run with outbound internet egress denied by default.
-  Any exception (for example a model download) MUST be explicit, documented, and carried out by
-  a step that has no access to personal data.
-- Dependencies, model runtimes and container images MUST be checked for phone-home behaviour,
-  and that behaviour MUST be disabled before they are adopted.
+- Model downloads and other internet-facing setup steps MUST be separate from, and have no
+  access to, personal data.
+- Telemetry, analytics and update checks in dependencies, model runtimes and container images
+  MUST be turned off when they are known about. A full phone-home audit and OS-level egress
+  denial are deferred hardening (see below).
 - Data sources MUST be accessed read-only unless a feature explicitly needs write access and
   the owner approves it.
 
 Rationale: privacy is the project's top priority. Anything that has left the network cannot be
-pulled back.
+pulled back. This principle is about never sharing data; defence-in-depth against a breach is
+added in stages (see Deferred Hardening).
 
 ### II. AI-Assistant & Secrets Boundary (NON-NEGOTIABLE)
 
@@ -43,22 +44,24 @@ Development assistants such as Claude Code count as third parties under Principl
 Rationale: the codebase is developed with AI help, but the data it handles must never reach
 that help.
 
-### III. Zero-Trust Access
+### III. Staged Access Control
 
-Only explicitly approved devices and users may connect to the home server.
+Access rules scale with how far the service is exposed. The project starts in local mode and
+adds controls only when it is reached from more places.
 
-- Every connection MUST be authenticated per device and per user against an allowlist. All
-  access is denied by default.
-- All traffic MUST be encrypted in transit, including traffic on the LAN.
-- Services MUST NOT be exposed directly to the public internet. Remote access, if provided,
-  MUST go through a private encrypted overlay (for example WireGuard) whose control plane is
-  self-hosted or cannot see payload data.
-- Authorization MUST be scoped per user: a family member sees only their own data unless it is
-  explicitly shared.
-- Revoking a device or user MUST be possible through configuration alone and MUST take effect
-  without redeploying code.
+- **Local mode** (the default): the service binds to a loopback address only and serves a
+  single owner. Per-device authentication and TLS are not required. It MUST reject requests
+  whose `Host` is not a loopback name (DNS-rebinding guard).
+- **LAN mode**: before the service listens on anything other than loopback, every connection
+  MUST be authenticated per device against an allowlist that denies by default, traffic MUST be
+  encrypted in transit, and revocation MUST work through configuration alone.
+- Services MUST NOT be exposed directly to the public internet in any mode. Remote access, if
+  ever provided, MUST go through a private encrypted overlay (for example WireGuard).
+- Data MUST be scoped by user in the data model from the start, so that adding family members
+  later does not need a migration of existing rows.
 
-Rationale: on a home server, the network boundary is the main line of defence for private data.
+Rationale: a single owner on one machine does not need zero-trust networking yet, but opening
+the service to the network without it would expose private data.
 
 ### IV. Portability Through Configuration
 
@@ -112,24 +115,41 @@ boundaries let a faster language be dropped in later where it pays off.
 
 ## Security & Data Handling Requirements
 
-- Personal data and derived data at rest MUST be stored encrypted, or on encrypted volumes.
 - Logs MUST NOT contain message bodies, file contents, subjects, addresses or other personal
   content. Log identifiers and metadata only.
 - Every data type MUST have a defined retention policy and a way for its owner to delete it.
-- Third-party dependencies MUST be pinned and reviewed for network behaviour before they are
-  added.
+- Third-party dependencies MUST be pinned.
 - Secrets MUST be supplied at runtime from files or a secret store outside the repository.
+- Personal data at rest SHOULD sit on an encrypted volume (for example FileVault). This is
+  recommended, not enforced, until the hardening below is taken on.
+
+## Deferred Hardening
+
+The following are intentionally not required yet. Each one becomes a MUST through a MINOR
+amendment when the owner decides it is needed, and LAN mode (Principle III) requires the access
+items before it is enabled.
+
+- OS-level outbound egress denial for services that touch personal data (for example `pf` or
+  `nftables` rules and a dedicated service user).
+- A reviewed network-behaviour audit of every dependency before it is added.
+- Enforced encryption at rest (startup checks, database-level encryption) and encrypted backups.
+- mTLS or equivalent per-device authentication, and TLS on the LAN (already required for LAN
+  mode).
+
+Existing implementations of these items MAY stay in the repository and MAY be used, but plans
+are not required to provide them.
 
 ## Development Workflow & Quality Gates
 
 - Every `/speckit-plan` MUST pass a Constitution Check covering data locality, the
-  assistant boundary, access control, portability and the memory budget.
+  assistant boundary, the access mode in use, portability and the memory budget.
 - Tests and examples MUST use synthetic fixtures only. Real data MUST NOT appear in tests,
   issues, commits or prompts.
 - Each component MUST include an automated check that it makes no unexpected outbound network
   calls during processing.
-- Changes that touch authentication, network exposure or data storage MUST include a written
-  privacy and security note in the spec or plan.
+- Changes that expose the service beyond loopback, add a new place where personal data is
+  stored, or add a component that talks to the network MUST include a short privacy note in
+  the spec or plan.
 
 ## Governance
 
@@ -145,4 +165,4 @@ approval.
   fixed or justified in the plan's complexity tracking. Violations of Principles I and II cannot
   be justified.
 
-**Version**: 2.0.0 | **Ratified**: 2026-10-30 | **Last Amended**: 2026-10-30
+**Version**: 3.0.0 | **Ratified**: 2026-10-30 | **Last Amended**: 2026-11-01
