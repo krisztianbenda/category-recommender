@@ -149,7 +149,7 @@ Outputs: accuracy, new-category rate, latency p50/p95 and peak memory, written t
 ## R11. Language, service framework and process layout
 
 **Decision**:
-- One **Node.js 22 LTS + TypeScript** service. Fastify for HTTPS and the API, a static HTML/vanilla-TS web UI served by the same process, and `better-sqlite3` for storage.
+- One **Node.js 24 LTS + TypeScript** service. Fastify for HTTPS and the API, a static HTML/vanilla-TS web UI served by the same process, and `better-sqlite3` for storage.
 - No Python or Go is needed: inference and embeddings live in `llama-server`, and the remaining work is I/O-bound (Principle VI).
 - Processes on the Mac Mini, each under **launchd** as a dedicated non-admin macOS user `catrec`:
   1. `llama-server` (generation, 127.0.0.1:8081)

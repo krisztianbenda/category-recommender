@@ -29,7 +29,7 @@ done
 LLAMA_SERVER="$(command -v llama-server || true)"
 NODE="$(command -v node || true)"
 [[ -x "$LLAMA_SERVER" ]] || { echo "llama-server not found (brew install llama.cpp)" >&2; exit 1; }
-[[ -x "$NODE" ]] || { echo "node not found (Node.js 22 LTS)" >&2; exit 1; }
+[[ -x "$NODE" ]] || { echo "node not found (Node.js 24 LTS: brew install node@24)" >&2; exit 1; }
 for f in "$LLM_FILE" "$EMBED_FILE"; do
   [[ -f "$MODELS_DIR/$f" ]] || { echo "missing $MODELS_DIR/$f (run scripts/fetch-models.sh)" >&2; exit 1; }
 done

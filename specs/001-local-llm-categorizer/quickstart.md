@@ -7,7 +7,7 @@ Contracts: [http-api.md](./contracts/http-api.md), [config.md](./contracts/confi
 ## Prerequisites
 
 - Mac Mini (Apple Silicon, 16 GB), macOS with **FileVault on** (`fdesetup status`).
-- Node.js 22 LTS, `llama.cpp` (`llama-server`), `openssl`, `age`.
+- Node.js 24 LTS, `llama.cpp` (`llama-server`), `openssl`, `age`.
 - A dedicated non-admin macOS user `catrec` (created by `deploy/macos/setup.sh`).
 - About 7 GB of free disk space for the models.
 

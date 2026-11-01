@@ -26,7 +26,7 @@ The constitution's Security section says every dependency must be pinned and rev
 | vitest | 5.0.5 | Test runner | None (no telemetry) |
 | eslint, @eslint/js, typescript-eslint, globals | 10.14.0, 10.0.1, 8.72.1, 17.13.0 | Linting | None |
 | prettier | 3.9.10 | Formatting | None |
-| @types/node, @types/better-sqlite3 | 22.20.5, 9.6.0 | Type definitions | None |
+| @types/node, @types/better-sqlite3 | 24.19.2, 9.6.0 | Type definitions | None |
 
 ## External tools
 

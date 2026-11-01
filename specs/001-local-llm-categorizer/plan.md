@@ -19,7 +19,7 @@ Details: [research.md](./research.md).
 
 ## Technical Context
 
-**Language/Version**: Node.js 22 LTS, TypeScript 5.x (strict). No Python or Go (see Constitution Check VI).
+**Language/Version**: Node.js 24 LTS, TypeScript 5.x (strict). No Python or Go (see Constitution Check VI).
 
 **Primary Dependencies**:
 - Fastify (HTTPS, mTLS, JSON schema validation), `better-sqlite3`, `pino`, `yaml`, `ulid`, `undici` (LLM client)

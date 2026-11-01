@@ -19,7 +19,7 @@ How to install, run, maintain and move the category recommender on the home serv
 
 ## Install from scratch
 
-Prerequisites: FileVault on (`fdesetup status`), Homebrew, `brew install llama.cpp node@22 age`.
+Prerequisites: FileVault on (`fdesetup status`), Homebrew, `brew install llama.cpp node@24 age`.
 
 1. **Models** (the only step that uses the internet; run as your admin user):
 
