@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "catrec/llm-suggestion/v1",
+  "title": "LLM suggestion output (internal contract between catrec-service and the local LLM runtime)",
+  "description": "Used as the grammar/response_format constraint for the generation call. The service validates the result again in code (research R5, R8): the category must be one of the candidates unless isNew is true.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["isNew", "confidence", "reason", "ranking"],
+  "properties": {
+    "isNew": { "type": "boolean" },
+    "category": {
+      "description": "Exact candidate path. Required when isNew is false.",
+      "type": "string",
+      "pattern": "^[^/]{1,60}(/[^/]{1,60})?$"
+    },
+    "newCategory": {
+      "description": "Required when isNew is true.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent", "name"],
+      "properties": {
+        "parent": { "type": ["string", "null"], "pattern": "^[^/]{1,60}$" },
+        "name": { "type": "string", "pattern": "^[^/]{1,60}$" }
+      }
+    },
+    "confidence": { "enum": ["high", "medium", "low"] },
+    "reason": { "type": "string", "maxLength": 200 },
+    "ranking": {
+      "description": "Up to 5 existing candidate paths, best first.",
+      "type": "array",
+      "maxItems": 5,
+      "items": { "type": "string", "pattern": "^[^/]{1,60}(/[^/]{1,60})?$" }
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "isNew": { "const": false } } }, "then": { "required": ["category"] } },
+    { "if": { "properties": { "isNew": { "const": true } } }, "then": { "required": ["newCategory"] } }
+  ]
+}
