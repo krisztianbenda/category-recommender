@@ -35,6 +35,11 @@
   box-sizing: border-box;
 }
 
+/* Views and panels are toggled with the hidden attribute; keep it stronger than display rules. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);

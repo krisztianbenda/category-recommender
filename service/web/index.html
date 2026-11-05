@@ -10,13 +10,13 @@
     <header class="top">
       <strong>Category Recommender</strong>
       <nav>
-        <a href="/" aria-current="page">Suggest</a>
-        <a href="/sets.html">Category sets</a>
-        <a href="/learned.html">Learned data</a>
+        <a href="#suggest" aria-current="page">Suggest</a>
+        <a href="#sets">Category sets</a>
+        <a href="#learned">Learned data</a>
       </nav>
     </header>
 
-    <main class="grid">
+    <main class="grid" id="view-suggest">
       <form id="suggest-form" class="card" autocomplete="off">
         <h1>Suggest a category</h1>
         <label>From <input name="from" required placeholder="Sender name &lt;address&gt;" /></label>
@@ -82,6 +82,106 @@
       </section>
     </main>
 
+    <main class="grid" id="view-sets" hidden>
+      <section class="card">
+        <h1>Category sets</h1>
+        <label
+          >Set
+          <select id="sets-picker"></select
+        ></label>
+        <div class="actions">
+          <button id="rename-set" type="button" class="secondary">Rename set</button>
+          <button id="delete-set" type="button" class="danger">Delete set</button>
+        </div>
+        <form id="new-set">
+          <h2>New set</h2>
+          <label>Name <input name="name" maxlength="80" required /></label>
+          <label
+            >Categories, one per line (optional)
+            <textarea
+              name="categories"
+              rows="4"
+              placeholder="Family&#10;Family/Baby&#10;Gadgets"
+            ></textarea>
+          </label>
+          <button type="submit">Create set</button>
+        </form>
+        <p id="sets-status" class="error" role="status"></p>
+      </section>
+
+      <section class="card">
+        <h2 id="set-title">Categories</h2>
+        <form id="add-category" class="row">
+          <input
+            class="grow"
+            name="path"
+            placeholder="New category, e.g. Travelling/Trip Lisbon"
+            required
+          />
+          <button type="submit">Add</button>
+        </form>
+        <ul id="tree" class="tree"></ul>
+        <p class="muted">
+          Categories are at most two levels deep. Renaming or moving keeps what was learned.
+        </p>
+      </section>
+    </main>
+
+    <main class="grid" id="view-learned" hidden>
+      <section class="card">
+        <h1>What the system has learned</h1>
+        <label
+          >Set
+          <select id="learned-picker"></select
+        ></label>
+        <table>
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Examples</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="counts"></tbody>
+        </table>
+        <p id="learned-status" class="error" role="status"></p>
+      </section>
+
+      <section class="card">
+        <h2 id="list-title">Examples</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Category</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="examples"></tbody>
+        </table>
+        <div class="actions">
+          <button id="more" type="button" class="secondary" hidden>Show more</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Delete everything</h2>
+        <p>
+          Removes all category sets, categories, learned examples and accuracy history. This cannot
+          be undone.
+        </p>
+        <label
+          >Type <strong>DELETE ALL</strong> to confirm <input id="confirm-text" autocomplete="off"
+        /></label>
+        <button id="delete-all" type="button" class="danger">Delete all my data</button>
+      </section>
+    </main>
+
+    <!-- One page with three views: switching tabs only hides and shows them, so anything typed
+         stays in page memory (never in browser storage). -->
+    <script type="module" src="/nav.js"></script>
     <script type="module" src="/app.js"></script>
+    <script type="module" src="/sets.js"></script>
+    <script type="module" src="/learned.js"></script>
   </body>
 </html>

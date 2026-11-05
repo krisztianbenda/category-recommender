@@ -23,11 +23,13 @@ form.addEventListener("change", syncSource);
 async function loadSets() {
   const res = await api("GET", "/v1/category-sets");
   if (res.status !== 200) return;
+  const selected = setSelect.value;
   setSelect.replaceChildren(
     ...res.body.map((/** @type {any} */ s) =>
       el("option", { value: s.id }, [`${s.name} (${s.categoryCount})`]),
     ),
   );
+  if (res.body.some((/** @type {any} */ s) => s.id === selected)) setSelect.value = selected;
 }
 
 function field(/** @type {string} */ name) {
@@ -138,6 +140,12 @@ async function loadStats() {
     `(high ${pct(s.byConfidence.high)}, medium ${pct(s.byConfidence.medium)}, low ${pct(s.byConfidence.low)}). ` +
     `New categories proposed: ${s.newProposals.made}, accepted: ${s.newProposals.accepted}.`;
 }
+
+document.addEventListener("viewshown", (ev) => {
+  if (/** @type {CustomEvent} */ (ev).detail !== "suggest") return;
+  loadSets();
+  loadStats();
+});
 
 syncSource();
 loadSets();

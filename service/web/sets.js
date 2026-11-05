@@ -2,8 +2,8 @@
 import { api, el, errorMessage } from "./api.js";
 
 const $ = (/** @type {string} */ id) => /** @type {HTMLElement} */ (document.getElementById(id));
-const picker = /** @type {HTMLSelectElement} */ ($("set-picker"));
-const status = $("status");
+const picker = /** @type {HTMLSelectElement} */ ($("sets-picker"));
+const status = $("sets-status");
 
 /** @type {any} */
 let current = null;
@@ -51,7 +51,12 @@ function categoryRow(/** @type {any} */ c) {
   rename.addEventListener("click", async () => {
     const name = prompt("New name", c.path.split("/").at(-1));
     if (!name) return;
-    if (report(await api("PATCH", `/v1/categories/${c.id}`, { name }))) loadSets();
+    if (report(await api("PATCH", `/v1/categories/${c.id}`, { name })))
+      document.addEventListener("viewshown", (ev) => {
+        if (/** @type {CustomEvent} */ (ev).detail === "sets") loadSets();
+      });
+
+    loadSets();
   });
   const tops = current.categories.filter(
     (/** @type {any} */ x) => x.parentId === null && x.id !== c.id,
@@ -64,6 +69,10 @@ function categoryRow(/** @type {any} */ c) {
   move.addEventListener("change", async () => {
     const parentId = /** @type {HTMLSelectElement} */ (move).value || null;
     report(await api("PATCH", `/v1/categories/${c.id}`, { parentId }));
+    document.addEventListener("viewshown", (ev) => {
+      if (/** @type {CustomEvent} */ (ev).detail === "sets") loadSets();
+    });
+
     loadSets();
   });
   const del = el("button", { type: "button", class: "danger" }, ["Delete"]);
@@ -74,7 +83,12 @@ function categoryRow(/** @type {any} */ c) {
       : `Delete “${c.path}” and everything learned for it?`;
     if (!confirm(msg)) return;
     const q = children.length ? "?cascade=true" : "";
-    if (report(await api("DELETE", `/v1/categories/${c.id}${q}`))) loadSets();
+    if (report(await api("DELETE", `/v1/categories/${c.id}${q}`)))
+      document.addEventListener("viewshown", (ev) => {
+        if (/** @type {CustomEvent} */ (ev).detail === "sets") loadSets();
+      });
+
+    loadSets();
   });
   return el("div", { class: "row" }, [label, move, rename, del]);
 }
@@ -139,6 +153,10 @@ $("add-category").addEventListener("submit", async (ev) => {
     form.reset();
     loadSets(current.id);
   }
+});
+
+document.addEventListener("viewshown", (ev) => {
+  if (/** @type {CustomEvent} */ (ev).detail === "sets") loadSets();
 });
 
 loadSets();

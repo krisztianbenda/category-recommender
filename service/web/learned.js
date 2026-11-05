@@ -2,8 +2,8 @@
 import { api, el, errorMessage } from "./api.js";
 
 const $ = (/** @type {string} */ id) => /** @type {HTMLElement} */ (document.getElementById(id));
-const picker = /** @type {HTMLSelectElement} */ ($("set-picker"));
-const status = $("status");
+const picker = /** @type {HTMLSelectElement} */ ($("learned-picker"));
+const status = $("learned-status");
 
 /** @type {string | null} */
 let filterCategory = null;
@@ -17,9 +17,11 @@ function fail(/** @type {{status:number, body:any}} */ res) {
 async function loadSets() {
   const res = await api("GET", "/v1/category-sets");
   if (res.status !== 200) return fail(res);
+  const selected = picker.value;
   picker.replaceChildren(
     ...res.body.map((/** @type {any} */ s) => el("option", { value: s.id }, [s.name])),
   );
+  if (res.body.some((/** @type {any} */ s) => s.id === selected)) picker.value = selected;
   await loadCounts();
 }
 
@@ -105,6 +107,12 @@ $("delete-all").addEventListener("click", async () => {
   status.textContent = "All your data was deleted.";
   /** @type {HTMLInputElement} */ ($("confirm-text")).value = "";
   filterCategory = null;
+  loadSets();
+  loadExamples(true);
+});
+
+document.addEventListener("viewshown", (ev) => {
+  if (/** @type {CustomEvent} */ (ev).detail !== "learned") return;
   loadSets();
   loadExamples(true);
 });
