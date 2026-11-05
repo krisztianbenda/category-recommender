@@ -56,7 +56,8 @@ llama-server --host 127.0.0.1 --port 8081 --model "$MODELS_DIR/$LLM_FILE" --alia
   --ctx-size 8192 --parallel 1 --n-gpu-layers 999 --no-webui >"$HOME_DIR/logs/llm.log" 2>&1 &
 PIDS+=($!)
 llama-server --host 127.0.0.1 --port 8082 --model "$MODELS_DIR/$EMBED_FILE" --alias "$EMBED_ALIAS" \
-  --embedding --pooling cls --ctx-size 8192 --n-gpu-layers 999 --no-webui >"$HOME_DIR/logs/embeddings.log" 2>&1 &
+  --embedding --pooling cls --ctx-size 8192 --batch-size 8192 --ubatch-size 8192 \
+  --n-gpu-layers 999 --no-webui >"$HOME_DIR/logs/embeddings.log" 2>&1 &
 PIDS+=($!)
 
 echo "loading models (logs in $HOME_DIR/logs)..."

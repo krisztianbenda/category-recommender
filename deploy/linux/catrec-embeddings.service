@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 User=catrec
-ExecStart=/usr/local/bin/llama-server --host 127.0.0.1 --port 8082 --model /opt/catrec/models/bge-m3-q8_0.gguf --alias bge-m3-q8_0 --embedding --pooling cls --ctx-size 8192 --n-gpu-layers 999 --no-webui
+ExecStart=/usr/local/bin/llama-server --host 127.0.0.1 --port 8082 --model /opt/catrec/models/bge-m3-q8_0.gguf --alias bge-m3-q8_0 --embedding --pooling cls --ctx-size 8192 --batch-size 8192 --ubatch-size 8192 --n-gpu-layers 999 --no-webui
 Restart=on-failure
 IPAddressDeny=any
 IPAddressAllow=localhost

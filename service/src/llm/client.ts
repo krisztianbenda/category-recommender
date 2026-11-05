@@ -40,6 +40,11 @@ function endpoint(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${path}`;
 }
 
+/** llama-server serves /apply-template at its root, next to the OpenAI-style /v1 routes. */
+function serverRoot(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+}
+
 async function postJson(url: string, body: unknown, timeoutMs: number): Promise<unknown> {
   let res;
   try {
@@ -53,9 +58,15 @@ async function postJson(url: string, body: unknown, timeoutMs: number): Promise<
   } catch {
     throw new LlmUnavailableError();
   }
-  if (res.statusCode >= 500 || res.statusCode === 429) {
+  // 503 = still loading, 429 = busy. Any other 5xx comes from a running server that failed on
+  // this request (for example its output parser), so it is an unusable answer, not an outage.
+  if (res.statusCode === 503 || res.statusCode === 429) {
     await res.body.dump();
     throw new LlmUnavailableError();
+  }
+  if (res.statusCode >= 500) {
+    await res.body.dump();
+    throw new LlmOutputError(`model runtime failed on this request (${res.statusCode})`);
   }
   if (res.statusCode >= 400) {
     await res.body.dump();
@@ -91,27 +102,32 @@ export class LlmClient {
     return this.opts.model;
   }
 
-  /** Chat completion constrained to `schema`; returns the parsed JSON object. */
+  /**
+   * Completion constrained to `schema`; returns the parsed JSON object. The prompt is rendered with
+   * the model's own chat template (/apply-template) and generated through the plain completions
+   * endpoint, because llama-server's chat-output parser rejects some valid constrained answers
+   * ("does not match the expected peg-native format").
+   */
   async chat(messages: ChatMessage[], schema: object, maxTokens = 400): Promise<unknown> {
-    const body = {
-      model: this.opts.model,
-      messages,
-      temperature: 0,
-      max_tokens: maxTokens,
-      cache_prompt: true,
-      response_format: {
-        type: "json_schema",
-        json_schema: { name: "suggestion", strict: true, schema },
-      },
-    };
-    const res = (await postJson(
-      endpoint(this.opts.baseUrl, "chat/completions"),
-      body,
+    const { prompt } = (await postJson(
+      endpoint(serverRoot(this.opts.baseUrl), "apply-template"),
+      { messages, chat_template_kwargs: { enable_thinking: false } },
       this.opts.timeoutMs,
-    )) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const content = res.choices?.[0]?.message?.content;
+    )) as { prompt?: string };
+    if (typeof prompt !== "string") throw new LlmOutputError("model runtime returned no prompt");
+    const res = (await postJson(
+      endpoint(this.opts.baseUrl, "completions"),
+      {
+        model: this.opts.model,
+        prompt,
+        temperature: 0,
+        max_tokens: maxTokens,
+        cache_prompt: true,
+        json_schema: schema,
+      },
+      this.opts.timeoutMs,
+    )) as { choices?: { text?: string }[] };
+    const content = res.choices?.[0]?.text;
     if (typeof content !== "string") throw new LlmOutputError("model returned no content");
     try {
       return JSON.parse(stripThinking(content));

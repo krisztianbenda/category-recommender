@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 
 export interface ChatRequest {
   messages: { role: string; content: string }[];
-  response_format?: unknown;
+  json_schema?: unknown;
   [k: string]: unknown;
 }
 
@@ -21,6 +21,8 @@ export interface StubLlm {
   embeddingInputs: string[];
   setChat(handler: ChatHandler): void;
   setDown(down: boolean): void;
+  /** Makes /v1/completions fail with this status (null = normal), like llama-server's parser errors. */
+  setCompletionError(status: number | null): void;
   close(): Promise<void>;
 }
 
@@ -78,6 +80,7 @@ export const defaultChat: ChatHandler = (_req, { candidates }) => ({
 export async function startStubLlm(): Promise<StubLlm> {
   let handler: ChatHandler = defaultChat;
   let down = false;
+  let completionError: number | null = null;
   const chatCalls: ChatRequest[] = [];
   const embeddingInputs: string[] = [];
 
@@ -99,12 +102,20 @@ export async function startStubLlm(): Promise<StubLlm> {
           data: input.map((t, index) => ({ index, embedding: stubEmbedding(t) })),
         });
       }
-      if (req.method === "POST" && req.url === "/v1/chat/completions") {
-        const parsed = JSON.parse(body) as ChatRequest;
+      // Like llama-server: /apply-template renders messages to a prompt, /v1/completions generates.
+      // The stub's "prompt" is just the messages as JSON, so handlers still see the messages.
+      if (req.method === "POST" && req.url === "/apply-template") {
+        const { messages } = JSON.parse(body) as ChatRequest;
+        return send(200, { prompt: JSON.stringify(messages) });
+      }
+      if (req.method === "POST" && req.url === "/v1/completions") {
+        if (completionError) return send(completionError, { error: { code: completionError } });
+        const { prompt, ...rest } = JSON.parse(body) as { prompt: string; [k: string]: unknown };
+        const parsed: ChatRequest = { ...rest, messages: JSON.parse(prompt) };
         chatCalls.push(parsed);
         const out = handler(parsed, parsePrompt(parsed));
-        const content = typeof out === "string" ? out : JSON.stringify(out);
-        return send(200, { choices: [{ message: { role: "assistant", content } }] });
+        const text = typeof out === "string" ? out : JSON.stringify(out);
+        return send(200, { choices: [{ text }] });
       }
       send(404, { error: "not found" });
     });
@@ -118,6 +129,7 @@ export async function startStubLlm(): Promise<StubLlm> {
     embeddingInputs,
     setChat: (h) => (handler = h),
     setDown: (d) => (down = d),
+    setCompletionError: (status) => (completionError = status),
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections();

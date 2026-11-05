@@ -20,13 +20,15 @@ const SCHEMA_FILE = path.join(
   "llm-suggestion.schema.json",
 );
 
-/** The JSON schema object, also sent to the runtime as the response_format grammar. */
+/** The JSON schema object, also sent to the runtime as the json_schema grammar. */
 export const llmSuggestionSchema: Record<string, unknown> = JSON.parse(
   fs.readFileSync(SCHEMA_FILE, "utf8"),
 );
 
 // The runtime grammar does not need $id/$schema/descriptions, and llama.cpp's schema-to-grammar
 // converter does not support if/then; the conditional rules are enforced by Ajv afterwards.
+// In the grammar, `[^/]` would also match `"`, so the model's closing quote can be taken as part of
+// a name and generation stops mid-JSON; the grammar copy excludes the quote as well.
 export const llmResponseSchema: Record<string, unknown> = (() => {
   const {
     $schema: _s,
@@ -36,7 +38,7 @@ export const llmResponseSchema: Record<string, unknown> = (() => {
     allOf: _a,
     ...rest
   } = llmSuggestionSchema;
-  return rest;
+  return JSON.parse(JSON.stringify(rest).replaceAll("[^/]", String.raw`[^/\\\"]`));
 })();
 
 const ajv = new Ajv2020.default({ allErrors: false, strict: false });

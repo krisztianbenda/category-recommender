@@ -34,6 +34,7 @@ beforeAll(async () => {
 afterAll(async () => t.close());
 beforeEach(() => {
   t.stub.setDown(false);
+  t.stub.setCompletionError(null);
   t.stub.setChat(keywordChat);
 });
 
@@ -164,5 +165,14 @@ describe("POST /v1/suggestions", () => {
     expect(res.status).toBe(503);
     expect(res.body.error.code).toBe("llm_unavailable");
     expect(JSON.stringify(res.body)).not.toContain("Grandma");
+  });
+
+  it("says the answer was unusable, not that the model is down, when the runtime errors", async () => {
+    t.stub.setCompletionError(500);
+    const f = fixture("dad-lunch");
+    const res = await suggest({ email: f.email, categories: f.categories });
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe("llm_unavailable");
+    expect(res.body.error.message).toMatch(/unusable answer/);
   });
 });
