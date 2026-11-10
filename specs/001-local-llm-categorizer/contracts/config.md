@@ -45,6 +45,10 @@ learning:
   confidence: { knnAgreeShare: 0.6 }
   override: { share: 0.75, minExamples: 3 }   # past decisions win over the model (research R6)
   newCategoryDuplicateSimilarity: 0.90
+  deletion:                        # suggesting deletion (specs/003-delete-suggestion)
+    enabled: true
+    noFitShare: 0.5                # when no label fits, deleting needs at least this share
+    trashSimilarity: 0.75          # subject similarity for a trashed email from the same sender
 
 suggestions:
   ttlSeconds: 3600

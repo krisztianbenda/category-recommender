@@ -9,7 +9,8 @@ export interface IndexEntry {
   id: string;
   userId: string;
   setId: string;
-  categoryId: string;
+  /** null when the owner deleted the email instead of filing it. */
+  categoryId: string | null;
   embedding: Float32Array;
   embeddingModel: string;
   /** ms since epoch */
@@ -72,7 +73,7 @@ export class ExampleIndex {
 
   removeByCategory(categoryIds: Iterable<string>): number {
     const ids = new Set(categoryIds);
-    return this.removeWhere((e) => ids.has(e.categoryId));
+    return this.removeWhere((e) => e.categoryId !== null && ids.has(e.categoryId));
   }
 
   removeBySet(setId: string): void {

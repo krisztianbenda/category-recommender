@@ -199,6 +199,9 @@ button:disabled {
 .badge.low {
   color: var(--low);
 }
+.badge.delete {
+  color: var(--error);
+}
 
 .reason {
   margin: 0.25rem 0 0.75rem;

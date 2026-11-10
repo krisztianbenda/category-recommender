@@ -32,6 +32,12 @@ cd service && CATREC_CONFIG=~/.catrec/config.yaml npm run eval -- --suite refere
 
 **Delete everything learned**: Learned data → Delete all my data in the UI, or stop the service and `rm -rf ~/.catrec/data`.
 
+**Upgrading**: the service upgrades its database when it starts. The upgrade for suggesting deletion copies the table of learned examples, which keeps everything learned. To be able to go back to an older version, take a [backup](#backup-and-restore-fr-021) first.
+
+### Mail integration
+
+To file emails from macOS Mail under Gmail labels, install the menu bar app: `mail-app/scripts/install.sh`. It starts this service on demand, so you don't need to run `run-local.sh` yourself. It can also move an email to the Trash, and suggests that when you usually delete emails like it. See [`mail-app/README.md`](../mail-app/README.md).
+
 ### Removing the hardened setup
 
 If you installed the launchd/`catrec` setup described below, remove it before using local mode. Local mode needs ports 8080–8082 free.

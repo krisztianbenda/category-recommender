@@ -32,6 +32,7 @@ describe("GET /v1/stats/accuracy", () => {
       acceptedWithoutCorrection: null,
       byConfidence: { high: null, medium: null, low: null },
       newProposals: { made: 0, accepted: 0 },
+      deleteSuggestions: { made: 0, accepted: 0 },
     });
   });
 

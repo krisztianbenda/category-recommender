@@ -41,8 +41,9 @@ form.addEventListener("submit", async (ev) => {
   const button = /** @type {HTMLButtonElement} */ (form.querySelector("button[type=submit]"));
   $("form-error").textContent = "";
   const email = { from: field("from"), subject: field("subject"), body: field("body") };
+  // Deleting is one of the decisions this page offers, so it may be suggested.
   /** @type {any} */
-  const body = { email };
+  const body = { email, allowDelete: true };
   let candidates = [];
   if (source() === "list") {
     candidates = field("categories")
@@ -69,40 +70,67 @@ form.addEventListener("submit", async (ev) => {
   }
 });
 
+/** @param {any} s */
+function similarText(s) {
+  if (!s.similarPastDecisions) return "No similar past decisions yet.";
+  const deleted = s.similarDeleted ? `, ${s.similarDeleted} of them deleted` : "";
+  return `Based on ${s.similarPastDecisions} similar past decisions${deleted}.`;
+}
+
 function render() {
   if (!current) return;
   const s = current.suggestion;
+  const toDelete = s.action === "delete";
   $("result").hidden = false;
-  $("r-category").textContent = s.category;
-  $("r-new").hidden = !s.isNew;
+  $("r-category").textContent = toDelete ? "Delete this email" : s.category;
+  $("r-new").hidden = toDelete || !s.isNew;
+  $("r-delete").hidden = !toDelete;
   const conf = $("r-confidence");
   conf.textContent = `${s.confidence} confidence`;
   conf.className = `badge ${s.confidence}`;
   $("r-reason").textContent = s.reason;
   $("r-truncated").hidden = !s.truncated;
-  $("r-similar").textContent = s.similarPastDecisions
-    ? `Based on ${s.similarPastDecisions} similar past decisions.`
-    : "No similar past decisions yet.";
-  $("new-category").hidden = !s.isNew;
+  $("r-similar").textContent = similarText(s);
+  // When deleting is suggested, the label it would otherwise go to leads the alternatives.
+  $("new-category").hidden = toDelete || !s.isNew;
   if (s.isNew) {
     /** @type {HTMLInputElement} */ ($("new-name")).value = s.newCategory.name;
     $("new-parent").textContent = s.newCategory.parent ?? "(top level)";
   }
-  $("confirm").textContent = s.isNew ? "Accept new category" : "Confirm";
+  $("confirm").textContent = toDelete ? "Delete" : s.isNew ? "Accept new category" : "Confirm";
+  $("delete-instead").hidden = toDelete;
+  const keep = toDelete
+    ? [
+        s.isNew
+          ? {
+              label: `New: ${s.category}`,
+              decision: { decision: "accept_new", newCategory: s.newCategory },
+            }
+          : { label: s.category, decision: { decision: "choose", category: s.category } },
+      ]
+    : [];
+  const others = s.runnersUp.map((/** @type {any} */ r) => ({
+    label: r.path,
+    decision: { decision: "choose", category: r.path },
+  }));
   $("r-runners").replaceChildren(
-    ...s.runnersUp.map((/** @type {any} */ r) => {
-      const b = el("button", { type: "button", class: "secondary" }, [r.path]);
-      b.addEventListener("click", () => sendFeedback({ decision: "choose", category: r.path }));
+    ...[...keep, ...others].map(({ label, decision }) => {
+      const b = el("button", { type: "button", class: "secondary" }, [label]);
+      b.addEventListener("click", () => sendFeedback(decision));
       return el("li", {}, [b]);
     }),
   );
   $("feedback-status").textContent = "";
 }
 
+$("delete-instead").addEventListener("click", () => sendFeedback({ decision: "delete" }));
+
 $("confirm").addEventListener("click", () => {
   if (!current) return;
   const s = current.suggestion;
-  if (s.isNew) {
+  if (s.action === "delete") {
+    sendFeedback({ decision: "confirm" });
+  } else if (s.isNew) {
     const name = /** @type {HTMLInputElement} */ ($("new-name")).value.trim();
     sendFeedback({ decision: "accept_new", newCategory: { parent: s.newCategory.parent, name } });
   } else {
@@ -138,7 +166,8 @@ async function loadStats() {
   $("stats-text").textContent =
     `Last ${s.decisions} decisions: ${pct(s.acceptedWithoutCorrection)} accepted without correction ` +
     `(high ${pct(s.byConfidence.high)}, medium ${pct(s.byConfidence.medium)}, low ${pct(s.byConfidence.low)}). ` +
-    `New categories proposed: ${s.newProposals.made}, accepted: ${s.newProposals.accepted}.`;
+    `New categories proposed: ${s.newProposals.made}, accepted: ${s.newProposals.accepted}. ` +
+    `Deletions suggested: ${s.deleteSuggestions.made}, accepted: ${s.deleteSuggestions.accepted}.`;
 }
 
 document.addEventListener("viewshown", (ev) => {

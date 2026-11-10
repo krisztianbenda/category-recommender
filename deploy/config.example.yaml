@@ -43,6 +43,10 @@ learning:
     share: 0.75
     minExamples: 3
   newCategoryDuplicateSimilarity: 0.9
+  deletion: # suggesting deletion, from the owner's deleted emails and the Trash
+    enabled: true
+    noFitShare: 0.5 # when no label fits, deleting needs at least this share of the evidence
+    trashSimilarity: 0.75 # subject similarity for a trashed email from the same sender
 
 suggestions:
   ttlSeconds: 3600

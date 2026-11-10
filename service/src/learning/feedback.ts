@@ -11,7 +11,7 @@ import type { Logger } from "../logging/logger.js";
 import { contentHash, type PendingCache, type PendingSuggestion } from "../pending/cache.js";
 import type { Db } from "../store/db.js";
 import type { CategoryRepo } from "../store/repos/categories.js";
-import type { DecisionRepo } from "../store/repos/decisions.js";
+import type { DecisionOutcome, DecisionRepo } from "../store/repos/decisions.js";
 import {
   SNIPPET_MAX,
   type LearningExampleRepo,
@@ -26,11 +26,13 @@ import { toEntry, type ExampleIndex } from "./index.js";
 export type FeedbackInput =
   | { email: Email; decision: "confirm" }
   | { email: Email; decision: "choose"; category: string }
-  | { email: Email; decision: "accept_new"; newCategory: { parent: string | null; name: string } };
+  | { email: Email; decision: "accept_new"; newCategory: { parent: string | null; name: string } }
+  | { email: Email; decision: "delete" };
 
 export interface FeedbackResult {
   learningExampleId: string;
-  categoryId: string;
+  /** null when the owner deleted the email. */
+  categoryId: string | null;
 }
 
 export interface FeedbackDeps {
@@ -44,7 +46,20 @@ export interface FeedbackDeps {
   logger: Logger;
 }
 
-type Resolved = { path: string; outcome: Outcome; isNewCategory: boolean };
+type Resolved =
+  | { path: string; outcome: Exclude<Outcome, "deleted">; isNewCategory: boolean }
+  | { path: null; outcome: "deleted"; isNewCategory: false };
+
+const DELETED: Resolved = { path: null, outcome: "deleted", isNewCategory: false };
+
+/**
+ * Accuracy history counts a decision as confirmed when the owner did what was suggested: filed
+ * where it said, or deleted when it said to delete.
+ */
+function decisionOutcome(resolved: Resolved, suggestedDelete: boolean): DecisionOutcome {
+  if (resolved.outcome === "deleted") return suggestedDelete ? "confirmed" : "corrected";
+  return suggestedDelete ? "corrected" : resolved.outcome;
+}
 
 function byKey(candidates: Candidate[], path: string): Candidate | undefined {
   const k = pathKey(path);
@@ -79,8 +94,12 @@ export class FeedbackService {
 
   private resolve(p: PendingSuggestion, input: FeedbackInput): Resolved {
     const suggested = p.result;
+    const suggestedDelete = suggested.action === "delete";
     switch (input.decision) {
+      case "delete":
+        return DELETED;
       case "confirm":
+        if (suggestedDelete) return DELETED;
         if (suggested.isNew && suggested.newCategory) {
           return {
             path: resolveNew(p, suggested.newCategory),
@@ -92,7 +111,7 @@ export class FeedbackService {
       case "choose": {
         const c = byKey(p.candidates, input.category);
         if (!c) throw invalid("the chosen category was not one of the candidates");
-        const same = !suggested.isNew && pathKey(suggested.category) === c.key;
+        const same = !suggestedDelete && !suggested.isNew && pathKey(suggested.category) === c.key;
         return { path: c.path, outcome: same ? "confirmed" : "corrected", isNewCategory: false };
       }
       case "accept_new":
@@ -132,14 +151,23 @@ export class FeedbackService {
     const resolved = this.resolve(p, input);
 
     // Saved sets must already contain a chosen category; ad-hoc lists and accepted proposals are
-    // upserted (ad-hoc into the default set, research/data-model).
-    if (!p.adHoc && !resolved.isNewCategory && !d.categories.findByPath(p.setId, resolved.path)) {
+    // upserted (ad-hoc into the default set, research/data-model). A deleted email has none.
+    if (
+      resolved.path !== null &&
+      !p.adHoc &&
+      !resolved.isNewCategory &&
+      !d.categories.findByPath(p.setId, resolved.path)
+    ) {
       throw conflict("that category no longer exists in the set");
     }
 
     const decidedAt = nowIso();
+    const suggestedDelete = p.result.action === "delete";
     const { exampleId, categoryId, created } = d.db.transaction(() => {
-      const { id: categoryId, created } = d.categories.upsertPath(p.setId, resolved.path);
+      const { id: categoryId, created } =
+        resolved.path === null
+          ? { id: null, created: [] as string[] }
+          : d.categories.upsertPath(p.setId, resolved.path);
       const exampleId = d.examples.insert({
         userId,
         setId: p.setId,
@@ -156,9 +184,10 @@ export class FeedbackService {
       d.decisions.insert({
         userId,
         learningExampleId: exampleId,
-        outcome: resolved.outcome,
+        outcome: decisionOutcome(resolved, suggestedDelete),
         confidence: p.confidence,
-        wasNewProposal: p.result.isNew,
+        wasNewProposal: p.result.isNew && !suggestedDelete,
+        wasDeleteSuggestion: suggestedDelete,
         decidedAt,
       });
       return { exampleId, categoryId, created };

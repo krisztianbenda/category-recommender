@@ -70,4 +70,8 @@ for port in 8081 8082; do
 done
 
 echo "open http://127.0.0.1:8080/  (Ctrl+C to stop)"
-CATREC_CONFIG="$CONFIG" node "$REPO/service/dist/src/main.js"
+# In the background so that a SIGTERM to this script (from the Mail app, say) runs cleanup right away:
+# bash delays traps until a foreground child exits.
+CATREC_CONFIG="$CONFIG" node "$REPO/service/dist/src/main.js" &
+PIDS+=($!)
+wait "$!"

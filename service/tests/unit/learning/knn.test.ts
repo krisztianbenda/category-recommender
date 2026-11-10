@@ -20,7 +20,7 @@ const CATS = new Map([
 
 let n = 0;
 function entry(
-  categoryId: string,
+  categoryId: string | null,
   embedding: Float32Array,
   ageDays = 0,
   extra: Partial<IndexEntry> = {},
@@ -142,6 +142,35 @@ describe("KnnRetriever", () => {
     expect(out.examples[0]!.subject).toBe(entries[0]!.subject);
     for (const e of out.examples) expect(e.snippet.length).toBeLessThanOrEqual(300);
     expect(out.examples[0]!.path).toBe("Finance");
+  });
+
+  it("counts deleted emails apart from the category votes, and never as few-shot examples", () => {
+    const r = retriever([
+      entry(null, v(1, 0, 0), 0),
+      entry(null, v(1, 0, 0), 180),
+      entry("c-finance", v(0.8, 0.6, 0)),
+    ]);
+    const out = r.retrieve({ userId: "owner", setId: "set1", embedding: q, candidates });
+    expect(out.deleted.count).toBe(2);
+    expect(out.deleted.vote).toBeCloseTo(1 + 0.5);
+    expect(out.filedVote).toBeCloseTo(0.8);
+    expect([...out.votes.keys()]).toEqual(["finance"]);
+    expect(out.count).toBe(3);
+    expect(out.examples.map((e) => e.path)).toEqual(["Finance"]);
+  });
+
+  it("lets deleted emails take the nearest places from filed ones", () => {
+    const out = retriever(
+      [
+        entry(null, v(1, 0, 0)),
+        entry(null, v(1, 0.05, 0)),
+        entry("c-gadgets", v(1, 0.5, 0)),
+        entry("c-gadgets", v(1, 0.6, 0)),
+      ],
+      { neighbours: 2 },
+    ).retrieve({ userId: "owner", setId: "set1", embedding: q, candidates });
+    expect(out.deleted.count).toBe(2);
+    expect(out.filedVote).toBe(0);
   });
 
   it("reflects removals immediately", () => {

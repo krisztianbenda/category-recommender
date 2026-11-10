@@ -26,13 +26,17 @@ interface RankedCategory {
 
 interface Suggestion {
   suggestionId: string;
-  category: CategoryPath;              // the one suggested category (existing or proposed)
+  action: "file" | "delete";           // "delete" only when the request allowed it (specs/003)
+  category: CategoryPath;              // the one suggested category (existing or proposed);
+                                       // with action "delete", where to file it if kept
   isNew: boolean;                      // true → category is a proposal, not yet created
   newCategory?: { parent: CategoryPath | null; name: string };   // present iff isNew
   confidence: "high" | "medium" | "low";
   reason: string;                      // ≤ 25 words
   runnersUp: RankedCategory[];         // existing categories only, best first, max 5
   similarPastDecisions: number;        // how many learning examples informed this
+  similarDeleted: number;              // of those, how many the owner deleted
+  similarInTrash: number;              // similar emails from the same sender among `trash`
   truncated: boolean;                  // email was shortened before processing
   expiresAt: string;                   // ISO-8601; feedback must arrive before this
 }
@@ -57,6 +61,22 @@ Request (exactly one of `categories` or `categorySetId`):
 
 `200` → `Suggestion`. `400` if: no email text, a path deeper than 2, both or neither category source given, or an empty category list *and* no default set. An empty category list with a default set is allowed: the system may then only propose a new top-level category.
 
+Optional fields for suggesting deletion (specs/003-delete-suggestion):
+
+```json
+{
+  "email": { "...": "..." },
+  "categorySetId": "01J...",
+  "allowDelete": true,
+  "trash": [{ "from": "Shop <deals@shop.example.test>", "subject": "Weekly deals 3" }]
+}
+```
+
+- `allowDelete` (default `false`): the client can act on `action: "delete"`. Without it, the action is always `file`.
+- `trash` (at most 50): emails in the owner's Trash that the client found for this email, sender and subject only. Only those from the same sender address are compared, by subject. They are evidence that the owner deletes emails like this one, and are not stored. Other properties are dropped.
+
+Deletion is suggested when the owner's similar deleted emails and similar trashed emails outweigh the similar emails they filed as strongly as `learning.override` requires, or, when no label fits, by at least `learning.deletion.noFitShare`. The model never decides on deletion; `reason` then says what the evidence is.
+
 ### `POST /v1/suggestions/{suggestionId}/feedback`: confirm or correct (US2)
 
 ```json
@@ -74,11 +94,16 @@ Request (exactly one of `categories` or `categorySetId`):
 { "email": { "...": "..." }, "decision": "accept_new", "newCategory": { "parent": "Travelling", "name": "Trip Lisbon 2027" } }
 ```
 
-- `confirm`: accepts `category`. If that was a new proposal, this is the same as `accept_new` with the proposed name.
-- `choose`: `category` must be one of the original candidates.
-- `accept_new`: creates the category (the name may be edited; depth and duplicate rules apply).
+```json
+{ "email": { "...": "..." }, "decision": "delete" }
+```
 
-`201` → `{ "learningExampleId": "...", "categoryId": "..." }`. `409 content_mismatch` if the email hash differs. `410 suggestion_expired` after the TTL or a restart. A second feedback on the same suggestion returns `409`.
+- `confirm`: accepts the suggestion. For `action: "file"` that is `category`; if that was a new proposal, this is the same as `accept_new` with the proposed name. For `action: "delete"` it is the same as `delete`.
+- `choose`: `category` must be one of the original candidates. After a suggestion to delete, this is a correction even for the `category` it named.
+- `accept_new`: creates the category (the name may be edited; depth and duplicate rules apply).
+- `delete`: the owner deleted the email. It is learned with no category, whatever was suggested.
+
+`201` → `{ "learningExampleId": "...", "categoryId": "..." }`, with `categoryId: null` for `delete`. `409 content_mismatch` if the email hash differs. `410 suggestion_expired` after the TTL or a restart. A second feedback on the same suggestion returns `409`.
 
 ### Category sets (US3)
 
@@ -97,7 +122,7 @@ Request (exactly one of `categories` or `categorySetId`):
 
 | Method & path | Result |
 |---------------|--------|
-| `GET /v1/learning-examples?categoryId=&limit=&cursor=` | `{ items: [{ id, categoryPath, sender, subject, snippet, outcome, decidedAt }], nextCursor }` |
+| `GET /v1/learning-examples?categoryId=&limit=&cursor=` | `{ items: [{ id, categoryPath, sender, subject, snippet, outcome, decidedAt }], nextCursor }`. A deleted email has `outcome: "deleted"` and `categoryPath: null` |
 | `DELETE /v1/learning-examples/{id}` | `204` |
 | `DELETE /v1/categories/{id}/learning-examples` | `204` |
 | `DELETE /v1/me/data` with body `{ "confirm": "DELETE ALL" }` | `204`: removes all sets, categories, examples and decisions for the user |
@@ -109,8 +134,11 @@ Request (exactly one of `categories` or `categorySetId`):
 ```json
 { "window": 100, "decisions": 100, "acceptedWithoutCorrection": 0.87,
   "byConfidence": { "high": 0.96, "medium": 0.78, "low": 0.41 },
-  "newProposals": { "made": 6, "accepted": 4 } }
+  "newProposals": { "made": 6, "accepted": 4 },
+  "deleteSuggestions": { "made": 3, "accepted": 2 } }
 ```
+
+A decision is accepted without correction when the owner did what was suggested: filed under the suggested category, or deleted the email when deletion was suggested.
 
 ### Health
 

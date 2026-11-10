@@ -15,7 +15,7 @@ export function feedbackRoutes(app: FastifyInstance, ctx: AppContext): void {
           required: ["email", "decision"],
           properties: {
             email: emailSchema,
-            decision: { enum: ["confirm", "choose", "accept_new"] },
+            decision: { enum: ["confirm", "choose", "accept_new", "delete"] },
             category: categoryPathSchema,
             newCategory: {
               type: "object",

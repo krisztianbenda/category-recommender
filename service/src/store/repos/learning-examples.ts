@@ -1,14 +1,16 @@
 import type { Db } from "../db.js";
 import { fromBlob, newId, toBlob } from "../util.js";
 
-export type Outcome = "confirmed" | "corrected" | "accepted_new";
+/** How a category was chosen, or "deleted" when the owner deleted the email instead. */
+export type Outcome = "confirmed" | "corrected" | "accepted_new" | "deleted";
 
 export const SNIPPET_MAX = 600;
 
 export interface NewLearningExample {
   userId: string;
   setId: string;
-  categoryId: string;
+  /** null exactly when the outcome is "deleted". */
+  categoryId: string | null;
   suggestedCategoryPath: string;
   outcome: Outcome;
   sender: string;
@@ -24,7 +26,8 @@ export interface StoredExample {
   id: string;
   userId: string;
   setId: string;
-  categoryId: string;
+  /** null exactly when the outcome is "deleted". */
+  categoryId: string | null;
   outcome: Outcome;
   sender: string;
   subject: string;
@@ -38,7 +41,7 @@ interface Raw {
   id: string;
   user_id: string;
   set_id: string;
-  category_id: string;
+  category_id: string | null;
   outcome: Outcome;
   sender: string;
   subject: string;
@@ -112,7 +115,7 @@ export class LearningExampleRepo {
   listPaged(
     userId: string,
     opts: { categoryId?: string; limit: number; cursor?: string },
-  ): { items: (StoredExample & { categoryId: string })[]; nextCursor: string | null } {
+  ): { items: StoredExample[]; nextCursor: string | null } {
     const where = ["user_id = ?"];
     const args: unknown[] = [userId];
     if (opts.categoryId) {

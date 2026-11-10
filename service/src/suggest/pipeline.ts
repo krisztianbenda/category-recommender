@@ -12,16 +12,32 @@ import type { CategoryRepo, CategoryView } from "../store/repos/categories.js";
 import { newId } from "../store/util.js";
 import { invalid, notFound } from "../api/errors.js";
 import { computeConfidence, knnTop, type KnnSummary } from "./confidence.js";
+import {
+  comparableTrash,
+  decideDeletion,
+  deletionShare,
+  trashMatches,
+  type DeletionEvidence,
+} from "./deletion.js";
 import { buildMessages } from "./prompt.js";
 import type { Retrieval, Retriever } from "./retriever.js";
 import { truncateEmail } from "./truncate.js";
-import type { Email, RankedCategory, Suggestion } from "./types.js";
+import type { Confidence, Email, RankedCategory, Suggestion, TrashedEmail } from "./types.js";
 import { validateOutput, type ValidatedChoice } from "./validate.js";
 
 export interface SuggestInput {
   email: Email;
   categories?: string[];
   categorySetId?: string;
+  /** The client can act on a suggestion to delete the email. */
+  allowDelete?: boolean;
+  /** Emails in the owner's Trash that the client found for this one. Used, never stored. */
+  trash?: TrashedEmail[];
+}
+
+/** A filing suggestion is at most this sure when deleting is about as likely. */
+function capped(confidence: Confidence): Confidence {
+  return confidence === "high" ? "medium" : confidence;
 }
 
 export interface PipelineDeps {
@@ -140,7 +156,15 @@ export class SuggestionPipeline {
     const { setId, adHoc, candidates, views } = this.resolveCandidates(userId, input);
     const { email, truncated } = truncateEmail(input.email, config.llm.maxEmailTokens);
 
-    const [embedding] = await embedder.embed([embeddingText(email)]);
+    // Trashed emails are compared by subject in the same embedding request as the email itself.
+    const deletion = config.learning.deletion;
+    const canDelete = input.allowDelete === true && deletion.enabled;
+    const trash = canDelete ? comparableTrash(email, input.trash ?? []) : [];
+    const subjects = trash.length ? [email.subject, ...trash.map((t) => t.subject)] : [];
+    const [embedding, subjectVector, ...trashVectors] = await embedder.embed([
+      embeddingText(email),
+      ...subjects,
+    ]);
     const retrieval = retriever.retrieve({ userId, setId, embedding: embedding!, candidates });
 
     const { messages } = buildMessages({
@@ -166,9 +190,10 @@ export class SuggestionPipeline {
 
     const knn: KnnSummary | null =
       retrieval.count > 0 ? { votes: retrieval.votes, count: retrieval.count } : null;
+    const noFit = choice.isNew || choice.forcedLow || choice.llmConfidence === "low";
     const overridden = this.applyOverride(choice, candidates, knn);
     if (overridden) choice = overridden;
-    const confidence = overridden
+    let confidence = overridden
       ? "medium"
       : computeConfidence({
           llmConfidence: choice.llmConfidence,
@@ -179,17 +204,40 @@ export class SuggestionPipeline {
           agreeShare: config.learning.confidence.knnAgreeShare,
         });
 
+    // Deleting rather than filing: the owner's past deletions and their Trash are the evidence.
+    const evidence: DeletionEvidence = {
+      deleted: canDelete ? retrieval.deleted : { vote: 0, count: 0 },
+      trash: trashMatches(
+        subjectVector,
+        trashVectors,
+        deletion.trashSimilarity,
+        config.learning.neighbours,
+      ),
+      filedVote: retrieval.filedVote,
+    };
+    const verdict = canDelete
+      ? decideDeletion(evidence, noFit && !overridden, {
+          override: config.learning.override,
+          noFitShare: deletion.noFitShare,
+        })
+      : null;
+    if (verdict) confidence = verdict.confidence;
+    else if (deletionShare(evidence) >= deletion.noFitShare) confidence = capped(confidence);
+
     const now = Date.now();
     const expiresAt = now + pending.ttlMs;
     const suggestion: Suggestion = {
       suggestionId: newId(),
+      action: verdict ? "delete" : "file",
       category: choice.category,
       isNew: choice.isNew,
       ...(choice.isNew && choice.newCategory ? { newCategory: choice.newCategory } : {}),
       confidence,
-      reason: choice.reason,
+      reason: verdict?.reason ?? choice.reason,
       runnersUp: rankRunnersUp(choice, candidates, retrieval),
       similarPastDecisions: retrieval.count,
+      similarDeleted: retrieval.deleted.count,
+      similarInTrash: evidence.trash.count,
       truncated,
       expiresAt: new Date(expiresAt).toISOString(),
     };
@@ -212,8 +260,12 @@ export class SuggestionPipeline {
         setId,
         model: llm.model,
         confidence,
+        action: suggestion.action,
         isNew: suggestion.isNew,
         count: retrieval.count,
+        deletedCount: retrieval.deleted.count,
+        trashCount: input.trash?.length ?? 0,
+        trashMatched: evidence.trash.count,
       },
       "suggestion",
     );

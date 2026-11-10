@@ -73,7 +73,9 @@ async function loadExamples(reset = false) {
         el("br"),
         e.snippet.slice(0, 160),
       ]),
-      el("td", {}, [e.categoryPath, el("br"), el("span", { class: "muted" }, [e.outcome])]),
+      e.categoryPath === null
+        ? el("td", {}, [el("em", {}, ["Deleted, not filed"])])
+        : el("td", {}, [e.categoryPath, el("br"), el("span", { class: "muted" }, [e.outcome])]),
       el("td", {}, [del]),
     ]);
     del.addEventListener("click", async () => {

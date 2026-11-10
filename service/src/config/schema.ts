@@ -36,6 +36,13 @@ export interface Config {
     /** Past decisions override the model when they agree this strongly. */
     override: { share: number; minExamples: number };
     newCategoryDuplicateSimilarity: number;
+    /**
+     * Suggesting deletion (specs/003-delete-suggestion). The owner's similar deleted emails, and
+     * similar emails in the Trash, are evidence. Deletion is suggested when they outweigh the
+     * similar emails the owner filed as strongly as `override` requires, or, when no label fits,
+     * when their share is at least `noFitShare`.
+     */
+    deletion: { enabled: boolean; noFitShare: number; trashSimilarity: number };
   };
   suggestions: { ttlSeconds: number };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug"; retentionDays: number };
@@ -110,6 +117,15 @@ class Reader {
     return v;
   }
 
+  bool(o: Obj, key: string, path: string, def: boolean): boolean {
+    const v = o[key] ?? def;
+    if (typeof v !== "boolean") {
+      this.problems.push(`${path} must be true or false`);
+      return def;
+    }
+    return v;
+  }
+
   oneOf<T extends string>(o: Obj, key: string, path: string, allowed: readonly T[], def: T): T {
     const v = o[key] ?? def;
     if (typeof v !== "string" || !allowed.includes(v as T)) {
@@ -169,6 +185,7 @@ export function validateConfig(raw: unknown): Config {
   const learning = r.obj(raw, "learning", "learning");
   const conf = r.obj(learning, "confidence", "learning.confidence");
   const override = r.obj(learning, "override", "learning.override");
+  const deletion = r.obj(learning, "deletion", "learning.deletion");
   const sugg = r.obj(raw, "suggestions", "suggestions");
   const logging = r.obj(raw, "logging", "logging");
   const backup = r.obj(raw, "backup", "backup");
@@ -251,6 +268,19 @@ export function validateConfig(raw: unknown): Config {
         1,
         false,
       ),
+      deletion: {
+        enabled: r.bool(deletion, "enabled", "learning.deletion.enabled", true),
+        noFitShare: r.num(deletion, "noFitShare", "learning.deletion.noFitShare", 0.5, 0, 1, false),
+        trashSimilarity: r.num(
+          deletion,
+          "trashSimilarity",
+          "learning.deletion.trashSimilarity",
+          0.75,
+          0,
+          1,
+          false,
+        ),
+      },
     },
     suggestions: {
       ttlSeconds: r.num(sugg, "ttlSeconds", "suggestions.ttlSeconds", 3600, 10, 86400),

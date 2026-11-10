@@ -8,6 +8,7 @@ export interface AccuracyStats {
   acceptedWithoutCorrection: number | null;
   byConfidence: { high: number | null; medium: number | null; low: number | null };
   newProposals: { made: number; accepted: number };
+  deleteSuggestions: { made: number; accepted: number };
 }
 
 const accepted = (d: DecisionRow) => d.outcome !== "corrected";
@@ -19,6 +20,7 @@ function rate(rows: DecisionRow[]): number | null {
 export function accuracy(decisions: DecisionRepo, userId: string, window: number): AccuracyStats {
   const rows = decisions.lastN(userId, window);
   const proposals = rows.filter((r) => r.wasNewProposal);
+  const deletes = rows.filter((r) => r.wasDeleteSuggestion);
   return {
     window,
     decisions: rows.length,
@@ -31,6 +33,10 @@ export function accuracy(decisions: DecisionRepo, userId: string, window: number
     newProposals: {
       made: proposals.length,
       accepted: proposals.filter((r) => r.outcome === "accepted_new").length,
+    },
+    deleteSuggestions: {
+      made: deletes.length,
+      accepted: deletes.filter((r) => r.outcome === "confirmed").length,
     },
   };
 }

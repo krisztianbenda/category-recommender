@@ -24,7 +24,8 @@ export function learningDataRoutes(app: FastifyInstance, ctx: AppContext): void 
       const { items, nextCursor } = ctx.examples.listPaged(request.userId, request.query);
       // Resolve current paths (they follow renames/moves) per set.
       const paths = new Map<string, Map<string, string>>();
-      const pathOf = (setId: string, categoryId: string) => {
+      const pathOf = (setId: string, categoryId: string | null) => {
+        if (categoryId === null) return null; // the owner deleted the email
         let m = paths.get(setId);
         if (!m)
           paths.set(

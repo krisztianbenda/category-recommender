@@ -52,9 +52,9 @@ Users are created from configuration (`access.devices[].user`), not through the 
 | `id` | text (ULID), PK | |
 | `user_id` | FK → User | |
 | `set_id` | FK → CategorySet | |
-| `category_id` | FK → Category | the category the user confirmed or chose; cascade delete |
+| `category_id` | FK → Category, nullable | the category the user confirmed or chose; cascade delete. `null` exactly when `outcome` is `deleted` |
 | `suggested_category_path` | text | what the system suggested (may be a new proposal) |
-| `outcome` | enum | `confirmed` \| `corrected` \| `accepted_new` |
+| `outcome` | enum | `confirmed` \| `corrected` \| `accepted_new` \| `deleted` (the user deleted the email instead of filing it, specs/003) |
 | `sender` | text | from the email |
 | `subject` | text | |
 | `snippet` | text | first ≤ 600 chars of the plain-text body (used in few-shot prompts) |
@@ -74,6 +74,7 @@ Only created from feedback (FR-009). The full email body is never stored, only t
 | `outcome` | enum | `confirmed` \| `corrected` \| `accepted_new` |
 | `confidence` | enum | `high` \| `medium` \| `low` at suggestion time |
 | `was_new_proposal` | boolean | |
+| `was_delete_suggestion` | boolean | the suggestion was to delete the email (specs/003) |
 | `decided_at` | timestamp | |
 
 No content or category names: this table holds metadata only. It lets accuracy over the last N decisions be computed even after examples are deleted. "Delete all my data" removes these rows too.
@@ -97,6 +98,7 @@ No content or category names: this table holds metadata only. It lets accuracy o
 PendingSuggestion --(feedback: confirm)-------> LearningExample(outcome=confirmed)   + Decision
 PendingSuggestion --(feedback: choose other)--> LearningExample(outcome=corrected)   + Decision
 PendingSuggestion --(feedback: accept new)----> Category created + LearningExample(outcome=accepted_new) + Decision
+PendingSuggestion --(feedback: delete)--------> LearningExample(outcome=deleted, no category) + Decision
 PendingSuggestion --(TTL expires / restart)---> discarded (nothing stored)
 LearningExample  --(user delete)--------------> removed; Decision.learning_example_id = null
 ```
@@ -118,6 +120,7 @@ LearningExample  --(user delete)--------------> removed; Decision.learning_examp
 | Data | Retention | Deletion |
 |------|-----------|----------|
 | Email submitted for a suggestion | in memory ≤ TTL; never on disk | automatic |
+| Trashed emails sent with a suggestion (sender, subject) | for that request only; never stored | automatic |
 | LearningExample | until the user deletes it | single, by category, or all (FR-011) |
 | Decision | until the user deletes all data | with "delete all" |
 | Category sets and categories | until the user deletes them | API |
