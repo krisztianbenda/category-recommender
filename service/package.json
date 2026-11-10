@@ -2,6 +2,7 @@
   "name": "catrec-service",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Local, privacy-first email category recommender",
   "type": "module",
   "engines": {

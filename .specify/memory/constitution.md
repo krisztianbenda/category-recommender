@@ -1,3 +1,15 @@
+<!--
+Sync Impact Report
+- Version: 3.0.0 → 3.1.0 (MINOR: new principle and expanded workflow gates)
+- Added: Principle VII. Living Documentation
+- Changed: Development Workflow & Quality Gates (documentation gate, no personal content in commits)
+- Removed: none
+- Templates: .specify/templates/tasks-template.md ✅ updated; plan-template.md ✅ no change
+  needed (gates are derived from this file); spec-template.md ✅ no change needed
+- Docs: README.md ✅ rewritten; docs/architecture.md ✅ added; LICENSE ✅ added (MIT)
+- Approved by the owner on 2026-11-10
+-->
+
 # Category Recommender Constitution
 
 ## Core Principles
@@ -113,6 +125,27 @@ CPU-heavy parsing, ML or embedding tooling, or a long-running high-throughput wo
 Rationale: one default stack keeps the system simple and is the owner's learning focus. Clear
 boundaries let a faster language be dropped in later where it pays off.
 
+### VII. Living Documentation
+
+The repository is public. Its documentation MUST describe the code as it is, in the same change
+that alters it.
+
+- `README.md` MUST say what the project is and how to install and use it. A change to
+  prerequisites, install steps, commands, default paths or user-visible behaviour MUST update
+  it in the same change.
+- `docs/architecture.md` MUST describe the components, their contracts, the suggestion and
+  learning flow, and where data is stored. A change that adds, removes, renames or moves a
+  component, a contract or a data store MUST update it in the same change.
+- `LICENSE` MUST be present and MUST match the licence named in `README.md` and in package
+  metadata.
+- Documentation MUST follow Principle II: examples use synthetic data only, and never real
+  labels, folders, addresses or learned data.
+- A change is not complete until these documents are accurate. Plans and task lists MUST
+  include the documentation updates the feature needs.
+
+Rationale: other people can now read, install and build on the project. Documentation that
+lags behind the code misleads them, and it is cheapest to fix while the change is fresh.
+
 ## Security & Data Handling Requirements
 
 - Logs MUST NOT contain message bodies, file contents, subjects, addresses or other personal
@@ -142,7 +175,12 @@ are not required to provide them.
 ## Development Workflow & Quality Gates
 
 - Every `/speckit-plan` MUST pass a Constitution Check covering data locality, the
-  assistant boundary, the access mode in use, portability and the memory budget.
+  assistant boundary, the access mode in use, portability, the memory budget and the
+  documentation to update.
+- Every change MUST leave `README.md`, `docs/architecture.md` and `LICENSE` accurate
+  (Principle VII). Reviews MUST check this.
+- Everything committed is published. Personal content (real labels, folders, addresses,
+  learned data, configuration with personal values) MUST NOT be committed.
 - Tests and examples MUST use synthetic fixtures only. Real data MUST NOT appear in tests,
   issues, commits or prompts.
 - Each component MUST include an automated check that it makes no unexpected outbound network
@@ -165,4 +203,4 @@ approval.
   fixed or justified in the plan's complexity tracking. Violations of Principles I and II cannot
   be justified.
 
-**Version**: 3.0.0 | **Ratified**: 2026-10-30 | **Last Amended**: 2026-11-01
+**Version**: 3.1.0 | **Ratified**: 2026-10-30 | **Last Amended**: 2026-11-10
