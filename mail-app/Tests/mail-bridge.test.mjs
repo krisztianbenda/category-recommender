@@ -51,7 +51,9 @@ function whose(list, condition) {
     }
     return actual === wanted;
   };
-  const matching = () => list.filter((m) => Object.entries(condition).every(([k, v]) => test(m[k](), v)));
+  const meets = (m, c) =>
+    Object.entries(c).every(([k, v]) => (k === "_or" ? v.some((alternative) => meets(m, alternative)) : test(m[k](), v)));
+  const matching = () => list.filter((m) => meets(m, condition));
   const specifier = () => matching();
   for (const property of ["sender", "subject", "messageId", "dateReceived"]) {
     specifier[property] = () => matching().map((m) => m[property]());
@@ -838,4 +840,38 @@ test("moving to the Trash reports when macOS does not allow it, and when the ema
   assert.equal(call({ command: "trash", account: "Google", messageIds: ["mid-a"], titles: ["Nope"] }).result.result, "commandUnavailable");
   menu.onClick = () => inbox.messagesList.splice(0); // gone, but not to the Trash
   assert.equal(call({ command: "trash", account: "Google", messageIds: ["mid-a"], titles: ["Delete"] }).result.result, "notInTrash");
+});
+
+// Renamed labels: found by the emails learned for the old name
+
+const learned = [
+  { from: "Clinic <desk@clinic.example.test>", subject: "Check-up on Friday" },
+  { from: "School <office@school.example.test>", subject: "Trip form" },
+];
+
+test("counts, per mailbox, the emails it holds by subject and sender address", () => {
+  const { gmail, baby, gadgets, call } = setup();
+  const renamed = new FakeMailbox("Newborn", gmail);
+  gmail._children.push(renamed);
+  fakeMessage(1, renamed, { sender: "desk@CLINIC.example.test", subject: "Check-up on Friday", body: "SECRET-BODY" });
+  fakeMessage(2, renamed, { sender: "office@school.example.test", subject: "Trip form" });
+  // The same subject from someone else, and the same sender with another subject, do not count.
+  fakeMessage(3, baby, { sender: "Other <other@example.test>", subject: "Check-up on Friday" });
+  fakeMessage(4, gadgets, { sender: "desk@clinic.example.test", subject: "Invoice" });
+  const out = call({
+    command: "holding", account: "Google", emails: learned, mailboxes: ["Newborn", "Family/Baby", "Gadgets", "Gone"],
+  });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.deepEqual(out.result, { counts: [2, 0, 0, 0] });
+  assert.ok(!JSON.stringify(out).includes("SECRET-BODY"));
+});
+
+test("holding with one email, or none that can be matched, asks Mail for little or nothing", () => {
+  const { baby, call } = setup();
+  fakeMessage(1, baby, { sender: "desk@clinic.example.test", subject: "Check-up on Friday" });
+  const one = call({ command: "holding", account: "Google", emails: learned.slice(0, 1), mailboxes: ["Family/Baby"] });
+  assert.deepEqual(one.result, { counts: [1] });
+  const unusable = [{ from: "No address", subject: "Check-up on Friday" }, { from: "desk@clinic.example.test", subject: "" }];
+  const none = call({ command: "holding", account: "Google", emails: unusable, mailboxes: ["Family/Baby"] });
+  assert.deepEqual(none.result, { counts: [0] });
 });

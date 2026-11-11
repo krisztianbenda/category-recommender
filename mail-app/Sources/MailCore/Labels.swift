@@ -31,6 +31,19 @@ public enum LabelText {
             .joined(separator: "/")
     }
 
+    /// A category path's parent, if any, and the category's own name. Names never contain "/".
+    public static func split(_ path: String) -> (parent: String?, name: String) {
+        let parts = path.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        return parts.count == 2 ? (String(parts[0]), String(parts[1])) : (nil, path)
+    }
+
+    /// The label's own name, folded: the last part of its path, however deep the label sits. It is
+    /// what stays the same when a label is moved to another parent.
+    public static func leafKey(_ path: String) -> String {
+        let name = split(path).name
+        return normalise(name.components(separatedBy: deepSeparator).last ?? name)
+    }
+
     static func collapse(_ text: String) -> String {
         text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }

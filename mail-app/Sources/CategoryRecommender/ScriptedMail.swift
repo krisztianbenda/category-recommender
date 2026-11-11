@@ -30,6 +30,8 @@ struct ScriptedMail: MailSource {
         var messageIds: [String]?
         var sender: String?
         var limit: Int?
+        var mailboxes: [String]?
+        var emails: [LearnedEmail]?
     }
 
     private func call<Result: Decodable>(_ command: Command, timeout: TimeInterval) async throws -> Result {
@@ -153,6 +155,15 @@ struct ScriptedMail: MailSource {
         try await call(
             Command(command: "trashSimilar", account: account, messageIds: messageIds, sender: sender, limit: 20),
             timeout: 30)
+    }
+
+    private struct Held: Decodable { let counts: [Int] }
+
+    func holding(_ emails: [LearnedEmail], in mailboxes: [String], account: String) async throws -> [Int] {
+        let reply: Held = try await call(
+            Command(command: "holding", account: account, mailboxes: mailboxes, emails: emails),
+            timeout: 30)
+        return reply.counts
     }
 
     private struct Trashed: Decodable { let result: TrashResult }

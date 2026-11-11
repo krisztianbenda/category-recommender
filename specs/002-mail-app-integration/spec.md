@@ -43,6 +43,9 @@ The owner never maintains a category list. The recommender uses the labels that 
 3. **Given** a label with no learned decisions was removed, **When** the recommender is next triggered, **Then** it is no longer offered.
 4. **Given** a label with learned decisions was removed, **When** the recommender is next triggered, **Then** it is not offered as a label to file under, its learned decisions are kept, and the owner is told and can choose to forget them.
 5. **Given** labels nested deeper than the recommender's two levels, **When** they are imported, **Then** each can still be recommended and applied to the correct label.
+6. **Given** a label with learned decisions was moved to another parent, out of its parent, or under a parent, keeping its name, **When** the recommender is next triggered, **Then** the label is offered at its new place with its learned decisions, and the old place is not offered or reported as removed.
+7. **Given** a parent label was renamed, **When** the recommender is next triggered, **Then** its sub-labels keep their learned decisions under the new name.
+8. **Given** a label with learned decisions was renamed, and the label with the new name holds emails that were learned for the old one, **When** the recommender is next triggered, **Then** the renamed label keeps those learned decisions.
 
 ---
 
@@ -112,6 +115,7 @@ The owner does not have to start anything in a terminal. Triggering the recommen
 - **FR-005**: The system MUST exclude Gmail's system folders from the labels that can be recommended.
 - **FR-006**: The system MUST map every imported label back to the exact label in the account, including labels deeper than two levels.
 - **FR-007**: The system MUST NOT discard learned decisions because a label disappeared without the owner's confirmation.
+- **FR-025**: When a label is moved or renamed in the account, its learned decisions MUST follow it. A disappeared label and a new one MUST be treated as the same label only on clear evidence: the same name in a new place, a parent whose sub-labels reappear under one new parent, or the new label holding emails learned for the old one. Without such evidence, FR-007 applies.
 
 **Recommendation**
 
@@ -169,7 +173,7 @@ The owner does not have to start anything in a terminal. Triggering the recommen
 
 - Mail on this computer already has the owner's Gmail account configured and syncing. Mail's own connection to Gmail is the existing path for email, and this feature adds no new one.
 - Filing means what Gmail does when you label and archive: the label is added and the email leaves the Inbox. It stays in All Mail. Deleting a label keeps the emails in All Mail. Removing a label other than the Inbox is out of scope, because Mail cannot do it by script.
-- A renamed label appears as one removed label and one new label, as the account does not expose renames. Learned decisions stay with the old name until the owner forgets them.
+- The account does not expose renames or moves: a moved or renamed label appears as one removed label and one new label. They are paired by name or by the emails they hold (FR-025). A rename is recognised only once Mail has the label's emails, and a label replaced by an unrelated one, holding none of the old one's emails, is treated as removed.
 - One owner and one computer; the service runs in local mode. Using the integration from another computer is out of scope.
 - Automatic filing of incoming email is out of scope: the owner triggers every recommendation (constitution V).
 - Recommending which labels to delete is out of scope. Deletion is the owner's decision, offered from the window.

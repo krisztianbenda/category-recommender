@@ -16,6 +16,10 @@ public protocol RecommenderAPI: Sendable {
     func getSet(id: String) async throws -> SetDetail
     func addCategory(setId: String, path: String) async throws -> String
     func deleteCategory(id: String, cascade: Bool) async throws
+    /// Renames or moves a category. Its id, and so its learning, stay.
+    func updateCategory(id: String, name: String?, parent: ParentChange) async throws
+    /// The most recent emails learned for a category, newest first.
+    func learnedEmails(categoryId: String, limit: Int) async throws -> [LearnedEmail]
     /// `allowDelete`: the window can act on a suggestion to delete. `trash`: emails from the same
     /// sender in the Trash, which the service uses as evidence and does not keep.
     func suggest(email: Email, setId: String, allowDelete: Bool, trash: [TrashedEmail]) async throws -> Suggestion
@@ -149,6 +153,47 @@ public final class ServiceClient: RecommenderAPI, @unchecked Sendable {
 
     public func deleteCategory(id: String, cascade: Bool) async throws {
         _ = try await send("DELETE", "/v1/categories/\(id)?cascade=\(cascade)")
+    }
+
+    private struct UpdateCategoryBody: Encodable {
+        let name: String?
+        let parent: ParentChange
+
+        enum CodingKeys: String, CodingKey { case name, parentId }
+
+        /// Moving to the top level needs an explicit null, and keeping the parent needs no key.
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(name, forKey: .name)
+            switch parent {
+            case .keep: break
+            case .topLevel: try container.encodeNil(forKey: .parentId)
+            case .under(let id): try container.encode(id, forKey: .parentId)
+            }
+        }
+    }
+
+    public func updateCategory(id: String, name: String?, parent: ParentChange) async throws {
+        let body = try JSONEncoder().encode(UpdateCategoryBody(name: name, parent: parent))
+        // A new name is embedded for the near-duplicate check.
+        _ = try await send("PATCH", "/v1/categories/\(id)", body: body, timeout: 60)
+    }
+
+    private struct LearnedPage: Decodable {
+        struct Item: Decodable {
+            let sender: String
+            let subject: String
+        }
+        let items: [Item]
+    }
+
+    public func learnedEmails(categoryId: String, limit: Int) async throws -> [LearnedEmail] {
+        var query = URLComponents()
+        query.queryItems = [
+            URLQueryItem(name: "categoryId", value: categoryId), URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        let data = try await send("GET", "/v1/learning-examples?\(query.percentEncodedQuery ?? "")")
+        return try decode(LearnedPage.self, data).items.map { LearnedEmail(from: $0.sender, subject: $0.subject) }
     }
 
     private struct SuggestBody: Encodable {

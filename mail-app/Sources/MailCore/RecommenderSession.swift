@@ -237,7 +237,11 @@ public final class RecommenderSession: ObservableObject {
             }
             backend.noteActivity()
             recommendation = .thinking
-            let result = try await LabelSync.run(api: api, setName: setName, catalog: catalog)
+            let mail = self.mail
+            let accountName = account?.name ?? ""
+            let result = try await LabelSync.run(api: api, setName: setName, catalog: catalog) { emails, mailboxes in
+                try await mail.holding(emails, in: mailboxes, account: accountName)
+            }
             setId = result.setId
             categories = result.categories
             orphaned = result.orphaned

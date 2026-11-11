@@ -100,12 +100,14 @@ A menu bar app with no third-party dependencies, in two targets:
 
 | Target | Responsibility |
 |--------|----------------|
-| `Sources/MailCore/` | No UI: label and folder mapping, syncing them to a category set per account, the HTTP client for the service, session state |
+| `Sources/MailCore/` | No UI: label and folder mapping, syncing them to a category set per account (following labels that were moved or renamed), the HTTP client for the service, session state |
 | `Sources/CategoryRecommender/` | The app: menu bar item, floating window, hot key, running the Mail bridge, starting and stopping the service on demand |
 
-`Resources/mail-bridge.js` is the only code that touches Mail. It is JavaScript for Automation run through `osascript`: it reads the selected email, lists mailboxes, files an email, and moves one to the Trash with Mail's own commands. Input is passed as data, never spliced into a script.
+`Resources/mail-bridge.js` is the only code that touches Mail. It is JavaScript for Automation run through `osascript`: it reads the selected email, lists mailboxes, files an email, moves one to the Trash with Mail's own commands, and counts which mailboxes hold given emails. Input is passed as data, never spliced into a script.
 
-The app is a client of the service's HTTP API and holds no learned data of its own. Design: [`specs/002-mail-app-integration/plan.md`](../specs/002-mail-app-integration/plan.md).
+The app is a client of the service's HTTP API and holds no learned data of its own.
+
+Mail does not report that a label was moved or renamed: the old label is gone and a new one appears. Each sync pairs them on evidence (same name in a new place, a renamed parent's children, or the new label holding emails learned for the old one) and renames or moves the category in place, so its learning stays. Design: the Sync section of the plan. Design: [`specs/002-mail-app-integration/plan.md`](../specs/002-mail-app-integration/plan.md).
 
 ## Data
 
@@ -116,6 +118,7 @@ The app is a client of the service's HTTP API and holds no learned data of its o
 | Categories and category sets | SQLite | Until the owner deletes them |
 | Decisions (no content) | SQLite | See the retention table in the data model |
 | Trashed emails' senders and subjects | Service memory | For the duration of one request |
+| Learned emails' senders and subjects, to find a renamed label | Mail app memory | For one sync, only when a label with learned decisions is gone |
 | Logs | Data and log directories | Identifiers and counts only, rotated |
 | Preferences of the Mail app | `UserDefaults` | Until uninstall |
 

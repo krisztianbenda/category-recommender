@@ -457,6 +457,25 @@ function senderAddress(from) {
 }
 
 const MAX_TRASH_MATCHES = 50;
+const MAX_HELD_EMAILS = 10;
+const MAX_HELD_MAILBOXES = 30;
+
+/**
+ * How many of these emails the mailbox holds: the same subject and sender address. Mail filters
+ * by subject, which is quick, and the sender is compared here, as the service compares it.
+ */
+function heldCount(mailbox, emails) {
+  const subjects = emails.map((e) => e.subject).filter((s, i, all) => all.indexOf(s) === i);
+  if (!mailbox || !subjects.length) return 0;
+  const condition =
+    subjects.length === 1 ? { subject: subjects[0] } : { _or: subjects.map((subject) => ({ subject })) };
+  const hits = mailbox.messages.whose(condition);
+  const senders = attempt(() => hits.sender(), []) || [];
+  const found = attempt(() => hits.subject(), []) || [];
+  return emails.filter((e) =>
+    found.some((subject, i) => subject === e.subject && senderAddress(String(senders[i] || '')) === e.address),
+  ).length;
+}
 
 function sameSet(a, b) {
   return a.length === b.length && a.every((x) => b.indexOf(x) >= 0);
@@ -586,6 +605,18 @@ const commands = {
     return { result: arrived ? 'trashed' : 'notInTrash' };
   },
 
+  // For each mailbox, how many of these emails it holds. It tells a renamed label from a new one,
+  // by the emails learned for the old name. Reading never changes a message.
+  holding(input) {
+    const account = accountNamed(input.account);
+    const emails = (input.emails || [])
+      .slice(0, MAX_HELD_EMAILS)
+      .map((e) => ({ address: senderAddress(String(e.from || '')), subject: String(e.subject || '') }))
+      .filter((e) => e.subject && e.address.indexOf('@') >= 0);
+    const paths = (input.mailboxes || []).slice(0, MAX_HELD_MAILBOXES);
+    return { counts: paths.map((path) => (emails.length ? heldCount(resolve(account, path), emails) : 0)) };
+  },
+
   exists(input) {
     return { exists: resolve(accountNamed(input.account), input.path) !== null };
   },
@@ -705,6 +736,15 @@ const commands = {
         const before = holding(named(parent)).length;
         Mail.duplicate(message, { to: named(parent) });
         return until(() => holding(named(parent)).length > before, 10);
+      });
+      // How a renamed label is recognised: by subject and sender, with two subjects to ask for.
+      step('findBySubjectAndSender', () => {
+        const address = senderAddress(String(message.sender()));
+        const emails = [
+          { address, subject: 'Self-test subject' },
+          { address, subject: 'Self-test subject that no message has' },
+        ];
+        return heldCount(named(parent), emails) === 1;
       });
     }
     step('showMailboxInMail', () => {

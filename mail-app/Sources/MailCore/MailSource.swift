@@ -130,6 +130,18 @@ public struct TrashedEmail: Codable, Equatable, Sendable {
     }
 }
 
+/// An email the owner filed under a category, as far as finding it again in Mail needs: never its
+/// text.
+public struct LearnedEmail: Codable, Equatable, Sendable {
+    public let from: String
+    public let subject: String
+
+    public init(from: String, subject: String) {
+        self.from = from
+        self.subject = subject
+    }
+}
+
 public struct TrashLookup: Codable, Equatable, Sendable {
     /// The account's Trash was found. Without it, nothing is deleted.
     public let found: Bool
@@ -193,6 +205,9 @@ public protocol MailSource: Sendable {
     func messageCount(_ path: String, account: String) async throws -> Int
     /// Reads the Trash: emails from this sender, and whether these emails are there already.
     func trashSimilar(sender: String, messageIds: [String], account: String) async throws -> TrashLookup
+    /// For each mailbox, how many of these emails it holds, matched by sender address and subject.
+    /// Tells a renamed label from a new one. Reading never changes a message.
+    func holding(_ emails: [LearnedEmail], in mailboxes: [String], account: String) async throws -> [Int]
     /// Moves the selected emails to the Trash with Mail's own Delete command, only if Mail's
     /// selection is exactly these emails and none of them is in the Trash already.
     func moveToTrash(messageIds: [String], account: String) async throws -> TrashResult

@@ -96,7 +96,12 @@ Mail doesn't let apps delete a mailbox directly, so the app selects the label in
 Labels and folders are read from Mail every time you open the window, and the account's system folders are left out. They are kept in one category set per account, named `Gmail: <your address>` for Gmail and `Mail: <your address>` for other accounts, which you can also see in the web UI. Each filing teaches the recommender, the same way as in the web UI.
 
 - **Removed labels**: if a label is removed outside this window and it has learned decisions, those decisions are kept. The window tells you, and **Forget** removes them.
-- **Renamed labels**: these look like a removed label plus a new one, so learning starts again under the new name.
+- **Moved and renamed labels**: what was learned for a label follows it when you move or rename it in Gmail or Mail. Mail doesn't say that a label moved: it shows the old one gone and a new one. The app treats them as the same label when one of these is true:
+  - It has the same name in another place: under another parent, at the top level, or under a parent for the first time. For example, `Family/Baby` moved to `Kids/Baby` or to `Baby`.
+  - It's a parent whose sub-labels now sit under one new parent. For example, `Family` renamed to `Home`. The sub-labels come along.
+  - The new label holds emails that were learned for the old one. This is how a label with a new name is recognised. For example, `Family/Baby` renamed to `Family/Newborn`.
+
+  Otherwise, for example when two labels have the same name or a new label holds none of those emails, the old label is treated as removed.
 - **Deep labels**: the recommender allows two levels, so `Work/Clients/Acme` appears as `Work/Clients › Acme`. It is still filed under the right label.
 - **Many labels**: the recommender considers the first 300, alphabetically. The window tells you if there are more, and you can still pick them by hand.
 
