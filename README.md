@@ -128,7 +128,7 @@ mail-app/scripts/test.sh && mail-app/Tests/e2e.sh
 ```
 
 - `main` only changes through pull requests, which are squash-merged. A pull request can be merged when the **CI result** and **PR title** checks pass; no review is required. The title becomes the commit message on `main`, so it must be a Conventional Commit too.
-- CI ([`.github/workflows/`](.github/workflows/)) runs the service's lint and tests, the end-to-end tests, the Mail app's tests on macOS, the commit message check, and a code duplication check that fails above 0.15% ([`.jscpd.json`](.jscpd.json)).
+- CI ([`.github/workflows/`](.github/workflows/)) runs the service's lint and tests, the end-to-end tests, the commit message check, and a code duplication check that fails above 0.15% ([`.jscpd.json`](.jscpd.json)). The Mail app's tests run on macOS when a pull request changes `mail-app/`, `service/`, `.github/` or `.nvmrc`, and always on `main`.
 - `npm run test:e2e` builds the service and replays a short synthetic session ([`fixtures/synthetic/e2e/`](fixtures/synthetic/e2e/session.json)) against it with a stub model: suggestions, feedback, learned habits, deletion, a restart and deleting all data.
 - `service/` is Node.js 24 and TypeScript. `npm run lint` checks formatting and lint rules.
 - `mail-app/` is Swift, with no third-party packages.

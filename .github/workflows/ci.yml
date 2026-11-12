@@ -1,6 +1,8 @@
 # Checks every pull request before it can be merged, and main after each merge.
 # The main branch ruleset requires only the "CI result" job, which fails when any other job
 # fails, so jobs can be added or renamed here without changing the ruleset.
+# The macOS job runs on a pull request only when it changes what that job tests (see "changes"),
+# so a stuck macOS runner queue does not block unrelated pull requests.
 name: CI
 
 on:
@@ -17,6 +19,35 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      mail-app: ${{ steps.paths.outputs.mail-app }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: paths
+        name: Does the change touch the Mail app, the service it runs against, or CI?
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "mail-app=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files="$(git diff --name-only "$BASE...$HEAD")"
+          if printf '%s\n' "$files" | grep -qE '^(mail-app/|service/|\.github/|\.nvmrc$)'; then
+            echo "mail-app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mail-app=false" >> "$GITHUB_OUTPUT"
+          fi
+
   repo:
     name: Repository checks
     runs-on: ubuntu-latest
@@ -54,6 +85,8 @@ jobs:
 
   mail-app:
     name: Mail app
+    needs: changes
+    if: needs.changes.outputs.mail-app == 'true'
     runs-on: macos-26
     timeout-minutes: 20
     steps:
@@ -72,15 +105,16 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [repo, service, mail-app]
+    needs: [changes, repo, service, mail-app]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Every job passed
+      # Skipped is fine: only the macOS job has a condition, and if "changes" fails, it fails here.
+      - name: Every job passed or was not needed
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           echo "job results: $RESULTS"
           for result in $RESULTS; do
-            [ "$result" = success ] || exit 1
+            [ "$result" = success ] || [ "$result" = skipped ] || exit 1
           done
