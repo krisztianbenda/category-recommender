@@ -169,13 +169,18 @@ private struct ReadyView: View {
                     .foregroundStyle(.secondary)
             }
             HStack {
-                Toggle("Keep in Inbox", isOn: $session.keepInInbox)
-                    .toggleStyle(.checkbox)
-                    .font(.caption)
-                    .help(
-                        session.usesFolders
-                            ? "File a copy, and leave the email in the Inbox"
-                            : "Add the label, and leave the email in the Inbox")
+                if session.usesFolders {
+                    // Filing only copies in these accounts for now, so the email always stays.
+                    Text("Files a copy")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help("The email stays where it is, and a copy goes to the folder")
+                } else {
+                    Toggle("Keep in Inbox", isOn: $session.keepInInbox)
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                        .help("Add the label, and leave the email in the Inbox")
+                }
                 Spacer()
                 Button {
                     session.moveToTrash()

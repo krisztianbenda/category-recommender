@@ -31,14 +31,13 @@ class FakeMailbox {
     return mailboxCollection(this);
   }
   get messages() {
+    // Like Mail: a specifier to call for the messages, which also answers length, byId and whose.
     const list = this.messagesList;
-    return {
-      get length() {
-        return list.length;
-      },
-      byId: (id) => list.find((m) => m.id() === id),
-      whose: (condition) => whose(list, condition),
-    };
+    const messages = () => list.slice();
+    Object.defineProperty(messages, "length", { get: () => list.length });
+    messages.byId = (id) => list.find((m) => m.id() === id);
+    messages.whose = (condition) => whose(list, condition);
+    return messages;
   }
 }
 
@@ -426,6 +425,70 @@ test("in a folder account, filing moves the email, or copies it when asked to", 
   ]);
 });
 
+test("an account that names nested folders by their whole path gets the same paths", () => {
+  const context = setup();
+  const { bills, inbox } = withFolders(context);
+  const year = new FakeMailbox("Bills/2026", context.icloud, bills);
+  const month = new FakeMailbox("Bills/2026/May", context.icloud, year);
+  year._children.push(month);
+  bills._children.push(year);
+  const flat = new FakeMailbox("Trips/Lisbon", context.icloud); // listed without a parent
+  context.icloud._children.push(flat);
+  const { mailboxes } = context.call({ command: "labels", account: "iCloud" }).result;
+  assert.deepEqual(mailboxes.filter((m) => /Bills|Trips/.test(m)), [
+    "Bills", "Bills/2026", "Bills/2026/May", "Trips/Lisbon",
+  ]);
+  fakeMessage(1, inbox);
+  for (const target of ["Bills/2026/May", "Trips/Lisbon"]) {
+    const out = context.call({
+      command: "file", account: "iCloud", target, items: [{ id: 1, mailbox: "Beérkezett", mode: "move" }],
+    });
+    assert.equal(out.ok, true);
+  }
+  assert.deepEqual(context.calls, [["move", 1, "Bills/2026/May"], ["move", 1, "Trips/Lisbon"]]);
+  assert.deepEqual(context.call({ command: "create", account: "iCloud", path: "Bills/2026" }).result, { created: false });
+  context.mail.selection = () => [fakeMessage(2, month)];
+  assert.equal(context.call({ command: "opening" }).result.selection.messages[0].mailbox, "Bills/2026/May");
+});
+
+test("a self-test step does not pass on a copy an earlier run left behind", () => {
+  const context = setup();
+  const { inbox } = withFolders(context);
+  const message = fakeMessage(1, inbox, { messageId: "mid-a" });
+  context.mail.selection = () => [message];
+  context.call({ command: "create", account: "iCloud", path: "catrec-selftest-folder" });
+  context.call({ command: "create", account: "iCloud", path: "catrec-selftest-folder/child" });
+  const folder = context.icloud.mailboxes().find((m) => m.name() === "catrec-selftest-folder");
+  const child = folder._children[0];
+  child.messagesList.push({ ...message, id: () => 800 }); // left by an earlier run
+  context.mail.duplicate = () => {}; // Mail does nothing this time
+  const { result } = context.call({ command: "selftestAccount", stamp: 1 });
+  assert.equal(result.steps.copyThroughFiling, "fail");
+  assert.ok(!("moveThroughFiling" in result.steps));
+});
+
+test("recovery leaves a self-test copy alone when its original is in the Inbox", () => {
+  const context = setup();
+  const { inbox } = withFolders(context);
+  const message = fakeMessage(1, inbox, { messageId: "mid-a" });
+  context.mail.inbox = { mailboxes: () => [inbox] };
+  const folder = new FakeMailbox("catrec-selftest-folder", context.icloud);
+  context.icloud._children.push(folder);
+  folder.messagesList.push({ ...message, id: () => 800 });
+  const lost = fakeMessage(2, folder, { messageId: "mid-lost" });
+  const moved = [];
+  context.mail.move = (m, { to }) => {
+    moved.push(m);
+    folder.messagesList.splice(folder.messagesList.indexOf(m), 1);
+    to.messagesList.push(m);
+  };
+  const { result } = context.call({ command: "selftestRecover" });
+  const icloud = result.accounts[0];
+  assert.deepEqual([icloud.moved, icloud.inInbox, icloud.left], [1, 1, 0]);
+  assert.deepEqual(moved, [lost]);
+  assert.equal(inbox.messagesList.filter((m) => m.messageId() === "mid-a").length, 1);
+});
+
 test("a move that Mail refuses as a command is done by setting the email's folder", () => {
   const context = setup();
   const { inbox, bills } = withFolders(context);
@@ -440,22 +503,27 @@ test("a move that Mail refuses as a command is done by setting the email's folde
   assert.equal(message.mailbox, bills);
 });
 
-test("the self-test of a folder account moves the selected Inbox email to a folder and back", () => {
+test("the self-test of a folder account moves a copy, and never the owner's email", () => {
   const context = setup();
   const { inbox } = withFolders(context);
   const message = fakeMessage(1, inbox, { messageId: "mid-a" });
   context.mail.selection = () => [message];
-  const moveTo = (to) => {
-    for (const box of [inbox, ...context.icloud.mailboxes()]) {
-      const at = box.messagesList.indexOf(message);
+  const moved = [];
+  context.mail.duplicate = (m, { to }) => {
+    to.messagesList.push({ ...m, id: () => 900 + to.messagesList.length });
+  };
+  context.mail.move = (m, { to }) => {
+    moved.push(m);
+    for (const box of context.icloud.mailboxes()) {
+      const at = box.messagesList.indexOf(m);
       if (at >= 0) box.messagesList.splice(at, 1);
     }
-    to.messagesList.push(message);
+    to.messagesList.push(m);
   };
-  context.mail.move = (m, { to }) => moveTo(to);
   const { result } = context.call({ command: "selftestAccount", stamp: 1 });
   assert.deepEqual([...new Set(Object.values(result.steps))], ["pass"]);
-  assert.ok("moveThroughFiling" in result.steps && "backToInbox" in result.steps);
+  assert.ok("copyThroughFiling" in result.steps && "moveThroughFiling" in result.steps);
+  assert.ok(!moved.includes(message));
   assert.deepEqual(inbox.messagesList, [message]);
 });
 

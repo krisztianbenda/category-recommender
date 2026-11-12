@@ -65,14 +65,13 @@ Each account in Mail has its own labels or folders and its own learning, so what
 | Account | Filing | Keep in Inbox | Deleting a label or folder |
 |---------|--------|---------------|----------------------------|
 | Gmail | Adds the label and archives the email | Adds the label only | The emails stay in All Mail |
-| iCloud, Exchange, other | Moves the email to the folder | Files a copy and leaves the email | **Mail deletes the emails in it** |
+| iCloud, Exchange, other | Files a copy in the folder, and the email stays where it is | Not shown: it always stays | **Mail deletes the emails in it** |
 
 ## What happens in iCloud, Exchange and other folder accounts
 
 An email is in exactly one folder, and the window says "folder" where it says "label" for Gmail.
 
-- **Filing** moves the email to the folder, from the Inbox or from another folder.
-- **Keep in Inbox** files a copy, and the email stays in the Inbox. It only applies to emails in the Inbox.
+- **Filing** puts a copy of the email in the folder, and the email stays where it is, so you take it out of the Inbox yourself. The window says **Files a copy** where Gmail accounts have **Keep in Inbox**. Moving is off for now: a scripted move once took an email out of the Inbox, and Mail never showed it again in any folder.
 - **Moving to the Trash** works as in Gmail, and how long the Trash keeps it is up to the account.
 - **Deleting a folder** deletes the emails in it. The window says so before it hands over to Mail, and Mail asks again.
 - The account's own Inbox, Sent, Drafts, Junk and Trash are left out, whatever they are called in your language, as are Archive, Notes and Exchange's Conversation History and Sync Issues. A folder inside the Inbox appears as `Inbox › Projects`.
@@ -137,7 +136,7 @@ open -n "$HOME/Applications/Category Recommender.app" --args --self-test-local -
 
 `--self-test-local` uses mailboxes under On My Mac and one fabricated message. Mail doesn't let scripts delete mailboxes, so `catrec-selftest` and `Import` stay under On My Mac until you delete them. Later runs reuse them.
 
-`--self-test-account` tests the real account on one email you select in the Inbox. In a folder account it creates the folder `catrec-selftest-folder` with a `child` folder under it, moves the email to `child` and moves it back to the Inbox. The folders stay, empty, for you to delete from the window. In Gmail it creates the label `catrec-selftest-labelled` with a `child` label under it, and files the email under `child`. It then archives the email with Mail's command and puts it back in the Inbox. The labels stay for you to delete from the window. That also tests that an email survives its label being deleted.
+`--self-test-account` tests the real account on one email you select in the Inbox. In a folder account it creates the folder `catrec-selftest-folder` with a `child` folder under it, puts a copy of the email in `catrec-selftest-folder` and moves the copy to `child`. Your email itself stays in the Inbox and is never moved. The folders stay, holding the copy, for you to delete from the window. In Gmail it creates the label `catrec-selftest-labelled` with a `child` label under it, and files the email under `child`. It then archives the email with Mail's command and puts it back in the Inbox. The labels stay for you to delete from the window. That also tests that an email survives its label being deleted.
 
 ## Uninstall
 

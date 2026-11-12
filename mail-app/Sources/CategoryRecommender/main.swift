@@ -27,8 +27,12 @@ let check: (String, TimeInterval)? =
     ? ("diagnose", 180)
     : arguments.contains("--self-test-local")
         ? ("selftestLocal", 300)
-        : arguments.contains("--self-test-account") || arguments.contains("--self-test-gmail")
-            ? ("selftestAccount", 400) : nil
+        : arguments.contains("--self-test-locate")
+        ? ("selftestLocate", 300)
+        : arguments.contains("--self-test-recover")
+            ? ("selftestRecover", 300)
+            : arguments.contains("--self-test-account") || arguments.contains("--self-test-gmail")
+                ? ("selftestAccount", 400) : nil
 
 if let (command, timeout) = check {
     Task {
