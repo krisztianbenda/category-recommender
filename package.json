@@ -1,0 +1,19 @@
+{
+  "name": "catrec-repo-checks",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Repository-wide checks: commit messages and code duplication",
+  "type": "module",
+  "engines": {
+    "node": ">=24.18 <25"
+  },
+  "scripts": {
+    "test": "node --test \"scripts/*.test.mjs\"",
+    "check:commit": "node scripts/conventional-commit.mjs",
+    "check:duplication": "jscpd"
+  },
+  "devDependencies": {
+    "jscpd": "5.4.2"
+  }
+}

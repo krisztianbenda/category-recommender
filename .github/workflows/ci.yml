@@ -1,0 +1,86 @@
+# Checks every pull request before it can be merged, and main after each merge.
+# The main branch ruleset requires only the "CI result" job, which fails when any other job
+# fails, so jobs can be added or renamed here without changing the ruleset.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  repo:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-deps
+      - name: Tests of the commit message check
+        run: npm test
+      - name: Code duplication stays at or below 0.15% (.jscpd.json)
+        run: npm run check:duplication
+
+  service:
+    name: Service
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: service
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-deps
+        with:
+          directory: service
+      - name: Lint and formatting
+        run: npm run lint
+      - name: Unit, contract and integration tests
+        run: npm test
+      - name: Build, then end to end with the synthetic session (fixtures/synthetic/e2e)
+        run: npm run test:e2e
+
+  mail-app:
+    name: Mail app
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the service, which the end-to-end test runs
+        uses: ./.github/actions/node-deps
+        with:
+          directory: service
+      - name: Swift and Mail bridge tests
+        run: mail-app/scripts/test.sh
+      - name: End to end against the real service, with a stub model and a synthetic Mail
+        run: mail-app/Tests/e2e.sh
+
+  result:
+    name: CI result
+    if: always()
+    needs: [repo, service, mail-app]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done

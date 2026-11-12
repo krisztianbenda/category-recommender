@@ -28,6 +28,16 @@ The constitution's Security section says every dependency must be pinned and rev
 | prettier | 3.9.10 | Formatting | None |
 | @types/node, @types/better-sqlite3 | 24.19.2, 9.6.0 | Type definitions | None |
 
+## Repository checks (root `package.json`, development and CI only)
+
+Exact pins in `package.json`, locked in `package-lock.json`. The commit message check (`scripts/conventional-commit.mjs`) has no dependencies.
+
+| Package | Version | Purpose | Network behaviour |
+|---------|---------|---------|-------------------|
+| jscpd | 5.4.2 | Code duplication check (`npm run check:duplication`, threshold in `.jscpd.json`). A prebuilt binary from a platform package such as `jscpd-linux-x64-gnu`; no install scripts | None for this check: it runs with network access denied. Only its opt-in `--semantic` mode downloads a model, which the project does not use |
+
+GitHub Actions, pinned to commit SHAs in `.github/`: `actions/checkout` v7.0.1 and `actions/setup-node` v7.1.0. They run only on GitHub's runners, with read-only access to this public repository and no personal data.
+
 ## External tools
 
 | Tool | Purpose | Network behaviour / hardening |
