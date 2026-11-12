@@ -612,7 +612,9 @@ const commands = {
     const emails = (input.emails || [])
       .slice(0, MAX_HELD_EMAILS)
       .map((e) => ({ address: senderAddress(String(e.from || '')), subject: String(e.subject || '') }))
-      .filter((e) => e.subject && e.address.indexOf('@') >= 0);
+      .filter((e) => e.subject && e.address.indexOf('@') >= 0)
+      // An email learned twice is still one email: it must not count twice.
+      .filter((e, i, all) => all.findIndex((o) => o.address === e.address && o.subject === e.subject) === i);
     const paths = (input.mailboxes || []).slice(0, MAX_HELD_MAILBOXES);
     return { counts: paths.map((path) => (emails.length ? heldCount(resolve(account, path), emails) : 0)) };
   },

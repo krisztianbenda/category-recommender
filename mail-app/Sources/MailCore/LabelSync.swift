@@ -36,8 +36,9 @@ public struct MovePlan: Equatable, Sendable {
 
     public init(catalog: LabelCatalog, existing: [CategoryItem]) {
         let wanted = catalog.considered
-        let wantedKeys = Set(wanted.map(\.key))
-        func isGone(_ item: CategoryItem) -> Bool { !wantedKeys.contains(LabelText.pathKey(item.path)) }
+        // A label past the catalog's limit is still in the account: it was not moved or renamed.
+        let accountKeys = Set(catalog.entries.map(\.key))
+        func isGone(_ item: CategoryItem) -> Bool { !accountKeys.contains(LabelText.pathKey(item.path)) }
         let existingKeys = Set(existing.map { LabelText.pathKey($0.path) })
         let fresh = wanted.filter { !existingKeys.contains($0.key) }
 
@@ -249,6 +250,7 @@ public enum LabelSync {
         for move in moves {
             guard let item = categories.first(where: { $0.id == move.item.id }) else { continue }
             let target = LabelText.split(move.to)
+            var changed = false
             do {
                 var parent = ParentChange.keep
                 if let parentPath = target.parent {
@@ -260,20 +262,23 @@ public enum LabelSync {
                         parentId = known.id
                     } else {
                         parentId = try await api.addCategory(setId: setId, path: parentPath)
+                        changed = true
                     }
                     if item.parentId != parentId { parent = .under(parentId) }
                 } else if item.parentId != nil {
                     parent = .topLevel
                 }
                 let name = LabelText.split(item.path).name == target.name ? nil : target.name
-                guard name != nil || parent != .keep else { continue }
-                try await api.updateCategory(id: item.id, name: name, parent: parent)
-                moved += 1
-            } catch ServiceError.api(status: 400, _, _) {
-                // For example, the new name is too close to another category's.
-            } catch ServiceError.api(status: 404, _, _) {
+                if name != nil || parent != .keep {
+                    // Set before the call: a refused rename may still have moved the category.
+                    changed = true
+                    try await api.updateCategory(id: item.id, name: name, parent: parent)
+                    moved += 1
+                }
+            } catch ServiceError.api {
+                // For example, the new name is too close to another category's. The sync goes on.
             }
-            categories = try await api.getSet(id: setId).categories
+            if changed { categories = try await api.getSet(id: setId).categories }
         }
         return moved
     }
