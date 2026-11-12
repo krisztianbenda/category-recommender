@@ -4,7 +4,7 @@
 // works in every clone and worktree without an install.
 //
 //   node scripts/conventional-commit.mjs .git/COMMIT_EDITMSG    # the commit-msg hook
-//   node scripts/conventional-commit.mjs --title "feat: add X"   # a pull request title (CI)
+//   node scripts/conventional-commit.mjs --title="feat: add X"   # a pull request title (CI)
 //
 // Pull requests are squash-merged and the title becomes the commit on main, so CI checks it.
 import fs from "node:fs";
@@ -25,15 +25,19 @@ export const TYPES = [
   "test",
 ];
 export const MAX_HEADER = 100;
+/** GitHub appends " (#123)" to a squash commit's title, so titles leave room for it. */
+export const MAX_TITLE = MAX_HEADER - " (#9999)".length;
 
 const HEADER = /^(?<type>\w+)(?:\((?<scope>[^()\s][^()]*)\))?(?<breaking>!)?: (?<subject>\S.*)$/;
 
-/** Messages that git or GitHub write, and fixups that are squashed away before a merge. */
-const EXEMPT = [
+/** Commits that git or GitHub write, and fixups that are squashed away before a merge. */
+const EXEMPT_COMMIT = [
   /^Merge (branch|branches|pull request|remote-tracking branch|tag|commit) /,
   /^Revert ".+"/,
   /^(fixup|squash|amend)! /,
 ];
+/** A title lands on main as it is, so only the title of GitHub's Revert button is let through. */
+const EXEMPT_TITLE = [/^Revert ".+"/];
 
 /** What git keeps of an edited message: no comment lines, nothing below the scissors line. */
 export function clean(message) {
@@ -45,25 +49,31 @@ export function clean(message) {
     .trim();
 }
 
-/** Returns what is wrong with the message, or nothing when it is a valid Conventional Commit. */
-export function check(message) {
-  const text = clean(message);
-  if (!text) return ["the message is empty"];
+/**
+ * Returns what is wrong with a commit message, or with a pull request title when `title` is set,
+ * or nothing when it is a valid Conventional Commit. A title is checked as it is: no comment
+ * lines are dropped and no fixup or merge title is let through.
+ */
+export function check(message, { title = false } = {}) {
+  const text = title ? message.trim() : clean(message);
+  const line = title ? "the title" : "the first line";
+  if (!text) return [title ? "the title is empty" : "the message is empty"];
   const [header, second] = text.split("\n");
-  if (EXEMPT.some((re) => re.test(header))) return [];
+  if ((title ? EXEMPT_TITLE : EXEMPT_COMMIT).some((re) => re.test(header))) return [];
 
   const errors = [];
   const m = HEADER.exec(header);
   if (!m) {
-    errors.push(`the first line must look like "<type>(<optional scope>): <description>"`);
+    errors.push(`${line} must look like "<type>(<optional scope>): <description>"`);
   } else {
     const { type, subject } = m.groups;
     if (!TYPES.includes(type))
       errors.push(`"${type}" is not a type; use one of: ${TYPES.join(", ")}`);
     if (subject.endsWith(".")) errors.push("the description must not end with a full stop");
   }
-  if (header.length > MAX_HEADER) {
-    errors.push(`the first line is ${header.length} characters; keep it to ${MAX_HEADER}`);
+  const max = title ? MAX_TITLE : MAX_HEADER;
+  if (header.length > max) {
+    errors.push(`${line} is ${header.length} characters; keep it to ${max}`);
   }
   if (second !== undefined && second.trim() !== "") {
     errors.push("leave a blank line between the first line and the body");
@@ -76,24 +86,25 @@ function main() {
     options: { title: { type: "string" } },
     allowPositionals: true,
   });
+  const title = values.title !== undefined;
   let message;
   let what;
-  if (values.title !== undefined) {
+  if (title) {
     message = values.title;
     what = "pull request title";
   } else if (positionals.length === 1) {
     message = fs.readFileSync(positionals[0], "utf8");
     what = "commit message";
   } else {
-    process.stderr.write("usage: conventional-commit.mjs <message-file> | --title <title>\n");
+    process.stderr.write("usage: conventional-commit.mjs <message-file> | --title=<title>\n");
     process.exit(2);
   }
-  const errors = check(message);
+  const errors = check(message, { title });
   if (errors.length === 0) return;
   process.stderr.write(
     [
       `✖ The ${what} is not a Conventional Commit:`,
-      `    ${clean(message).split("\n")[0] || "(empty)"}`,
+      `    ${(title ? message.trim() : clean(message)).split("\n")[0] || "(empty)"}`,
       ...errors.map((e) => `  - ${e}`),
       "",
       "  For example:  feat(web): keep typed content when switching tabs",

@@ -143,7 +143,8 @@ func driveKeyboard(session: RecommenderSession, controller: PanelController, mai
     }
     var report: [String: String] = [:]
     func json() -> String {
-        return json()
+        let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])
+        return data.map { String(decoding: $0, as: UTF8.self) } ?? "{}"
     }
     let recommended = session.rows.first
     report["recommended"] = recommended?.title

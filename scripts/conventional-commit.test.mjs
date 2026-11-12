@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, clean, MAX_HEADER } from "./conventional-commit.mjs";
+import { check, clean, MAX_HEADER, MAX_TITLE } from "./conventional-commit.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./conventional-commit.mjs", import.meta.url));
 
@@ -59,6 +59,19 @@ test("lets through what git and GitHub write themselves", () => {
   }
 });
 
+test("a pull request title lands on main as it is, so it gets no commit-only leniency", () => {
+  const title = (t) => check(t, { title: true });
+  assert.deepEqual(title("ci: check pull request titles"), []);
+  assert.deepEqual(title('Revert "feat: add a thing"'), []);
+  for (const t of ["fixup! feat: add a thing", "squash! fix: x", "Merge branch 'main' into x"]) {
+    assert.equal(title(t).length, 1, t);
+  }
+  assert.match(title("#12 feat: add a thing")[0], /the title must look like/);
+  assert.deepEqual(title(""), ["the title is empty"]);
+  assert.deepEqual(title(`feat: ${"x".repeat(MAX_TITLE - 6)}`), []);
+  assert.match(title(`feat: ${"x".repeat(MAX_TITLE - 5)}`)[0], /keep it to 92/);
+});
+
 test("ignores comment lines and everything below the scissors line, like git", () => {
   const edited = [
     "# Please enter the commit message for your changes.",
@@ -89,8 +102,10 @@ test("the command exits 1 for a bad message file or title and 0 for a good one",
     assert.equal(run(file), 0);
     fs.writeFileSync(file, "added a thing\n");
     assert.equal(run(file), 1);
-    assert.equal(run("--title", "ci: check pull request titles"), 0);
-    assert.equal(run("--title", "Add CI"), 1);
+    assert.equal(run("--title=ci: check pull request titles"), 0);
+    assert.equal(run("--title=Add CI"), 1);
+    assert.equal(run("--title=-WIP- fix: x"), 1);
+    assert.equal(run("--title=fixup! fix: x"), 1);
     assert.equal(run(), 2);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

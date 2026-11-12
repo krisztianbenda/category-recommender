@@ -4,6 +4,7 @@
 // suggesting deletion, learned data, a restart, deleting all data, and logs without content.
 // Run with `npm run test:e2e`, which builds first.
 import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -44,7 +45,7 @@ let stub: StubLlm;
 let root: string;
 let dataDir: string;
 let port: number;
-let service: ChildProcess | undefined;
+let service: { child: ChildProcess; exited: Promise<unknown>; done: boolean } | undefined;
 let setId: string;
 
 const call = <T = any>(method: string, url: string, body?: unknown) =>
@@ -65,9 +66,12 @@ async function startService(): Promise<void> {
   });
   let stderr = "";
   child.stderr!.on("data", (chunk) => (stderr += chunk));
-  service = child;
+  // The exit event also covers a death by signal, when exitCode stays null.
+  const current = { child, exited: once(child, "exit"), done: false };
+  void current.exited.then(() => (current.done = true));
+  service = current;
   for (let i = 0; i < 150; i++) {
-    if (child.exitCode !== null) throw new Error(`the service exited: ${stderr}`);
+    if (current.done) throw new Error(`the service exited: ${stderr}`);
     const health = await call("GET", "/v1/health").catch(() => null);
     if (health?.status === 200) return;
     await new Promise((r) => setTimeout(r, 100));
@@ -76,12 +80,11 @@ async function startService(): Promise<void> {
 }
 
 async function stopService(): Promise<void> {
-  const child = service;
+  const current = service;
   service = undefined;
-  if (!child || child.exitCode !== null) return;
-  const exited = new Promise((resolve) => child.once("exit", resolve));
-  child.kill("SIGTERM");
-  await exited;
+  if (!current || current.done) return;
+  current.child.kill("SIGTERM");
+  await current.exited;
 }
 
 /** The owner's decision for a suggestion, as the feedback request body. */

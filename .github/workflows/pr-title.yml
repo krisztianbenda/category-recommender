@@ -25,4 +25,4 @@ jobs:
       - name: The title is a Conventional Commit
         env:
           TITLE: ${{ github.event.pull_request.title }}
-        run: node scripts/conventional-commit.mjs --title "$TITLE"
+        run: node scripts/conventional-commit.mjs --title="$TITLE"
