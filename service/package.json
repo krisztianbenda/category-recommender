@@ -16,6 +16,7 @@
     "start": "node dist/src/main.js",
     "dev": "tsx src/main.ts",
     "test": "vitest run",
+    "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
     "eval": "tsx tests/eval/run.ts",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write ."

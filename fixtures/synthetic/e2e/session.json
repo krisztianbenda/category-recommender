@@ -1,0 +1,157 @@
+{
+  "note": "SYNTHETIC. One owner's short session, replayed in order by service/tests/e2e against the built service. Each step asks for a suggestion, checks `expect` when it is given, then sends the owner's decision as feedback. `expect` holds only what any model must produce: plain topics, a new trip, and habits learned from earlier steps.",
+  "categorySet": {
+    "name": "Household (e2e)",
+    "categories": ["Family", "Family/Baby", "Gadgets", "Finance", "Travelling", "Work"]
+  },
+  "steps": [
+    {
+      "id": "family-lunch",
+      "email": {
+        "from": "Aunt Kati <aunt.kati@example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Sunday lunch at grandma's",
+        "body": "Hi dear,\n\nThe whole family is meeting at grandma's on Sunday at noon. The cousins are coming too. Could you bring a salad?\n\nHugs,\nKati"
+      },
+      "expect": { "action": "file", "category": "Family" },
+      "owner": { "file": "Family" }
+    },
+    {
+      "id": "newborn-checkup",
+      "email": {
+        "from": "Little Steps Clinic <appointments@clinic.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Reminder: two-month checkup",
+        "body": "This is a reminder that your baby's two-month checkup with the paediatrician is on Tuesday at 9:30. Please bring the vaccination booklet."
+      },
+      "expect": { "action": "file", "category": "Family/Baby" },
+      "owner": { "file": "Family/Baby" }
+    },
+    {
+      "id": "laptop-shipped",
+      "email": {
+        "from": "GadgetMart <orders@gadgetmart.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Your new laptop has shipped",
+        "body": "Good news! The laptop you ordered left our warehouse today and should arrive on Thursday. Track the parcel in your account."
+      },
+      "expect": { "action": "file", "category": "Gadgets" },
+      "owner": { "file": "Gadgets" }
+    },
+    {
+      "id": "bank-statement",
+      "email": {
+        "from": "Example Bank <statements@bank.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Your monthly bank statement is ready",
+        "body": "Your statement for October is ready. Sign in to the bank app to see every payment and the closing balance."
+      },
+      "expect": { "action": "file", "category": "Finance" },
+      "owner": { "file": "Finance" }
+    },
+    {
+      "id": "lisbon-hotel",
+      "email": {
+        "from": "StayWell <reservations@staywell.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Hotel reservation confirmed: Lisbon, 3 nights",
+        "body": "Your hotel reservation in Lisbon is confirmed for 12 to 15 May. Check-in is from 14:00. Booking reference SYN-4821."
+      },
+      "expect": { "isNew": true, "newCategoryParent": "Travelling" },
+      "owner": { "fileNew": { "parent": "Travelling", "name": "Trip Lisbon" } }
+    },
+    {
+      "id": "lisbon-flight",
+      "email": {
+        "from": "FlyExample <no-reply@flyexample.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Flight booking to Lisbon",
+        "body": "Thank you for your booking. Your flight to Lisbon leaves on 12 May at 07:40. Online check-in opens 24 hours before departure."
+      },
+      "expect": { "action": "file", "category": "Travelling/Trip Lisbon", "isNew": false },
+      "owner": { "file": "Travelling/Trip Lisbon" }
+    },
+    {
+      "id": "standup-1",
+      "email": {
+        "from": "Team Lead <team@work.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Standup notes, sprint 41",
+        "body": "Standup notes for sprint 41: the release checklist is done, the dashboard refactor continues, and the retrospective is on Friday."
+      },
+      "owner": { "file": "Work" }
+    },
+    {
+      "id": "standup-2",
+      "email": {
+        "from": "Team Lead <team@work.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Standup notes, sprint 42",
+        "body": "Standup notes for sprint 42: the release checklist is half done, the dashboard refactor is in review, and the retrospective moves to Monday."
+      },
+      "owner": { "file": "Work" }
+    },
+    {
+      "id": "standup-3",
+      "email": {
+        "from": "Team Lead <team@work.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Standup notes, sprint 43",
+        "body": "Standup notes for sprint 43: the release checklist starts, the dashboard refactor is merged, and the retrospective is on Friday."
+      },
+      "owner": { "file": "Work" }
+    },
+    {
+      "id": "standup-4-learned",
+      "email": {
+        "from": "Team Lead <team@work.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Standup notes, sprint 44",
+        "body": "Standup notes for sprint 44: the release checklist is done, the dashboard refactor has a follow-up, and the retrospective is on Friday."
+      },
+      "expect": { "action": "file", "category": "Work", "minSimilarPastDecisions": 3 },
+      "owner": { "file": "Work" }
+    },
+    {
+      "id": "deals-1",
+      "email": {
+        "from": "Shoe Shop Deals <deals@shoeshop.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Weekly shoe discount voucher 1",
+        "body": "This week only: a discount voucher on running shoes and sandals. Use the voucher code at checkout."
+      },
+      "owner": { "delete": true }
+    },
+    {
+      "id": "deals-2",
+      "email": {
+        "from": "Shoe Shop Deals <deals@shoeshop.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Weekly shoe discount voucher 2",
+        "body": "This week only: a discount voucher on hiking shoes and sandals. Use the voucher code at checkout."
+      },
+      "owner": { "delete": true }
+    },
+    {
+      "id": "deals-3",
+      "email": {
+        "from": "Shoe Shop Deals <deals@shoeshop.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Weekly shoe discount voucher 3",
+        "body": "This week only: a discount voucher on winter shoes and slippers. Use the voucher code at checkout."
+      },
+      "owner": { "delete": true }
+    },
+    {
+      "id": "deals-4-learned",
+      "email": {
+        "from": "Shoe Shop Deals <deals@shoeshop.example.test>",
+        "to": ["owner@example.test"],
+        "subject": "Weekly shoe discount voucher 4",
+        "body": "This week only: a discount voucher on running shoes and slippers. Use the voucher code at checkout."
+      },
+      "expect": { "action": "delete", "minSimilarPastDecisions": 3 },
+      "owner": { "delete": true }
+    }
+  ]
+}
