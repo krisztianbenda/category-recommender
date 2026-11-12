@@ -2,9 +2,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { startTestApp, type TestApp } from "../helpers/app.js";
-import { keywordChat } from "../helpers/keyword-chat.js";
+import { beforeEach, describe, expect, it } from "vitest";
+import { useTestApp } from "../helpers/app.js";
 
 const FIXTURES = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -26,16 +25,10 @@ interface Suggestion {
   expiresAt: string;
 }
 
-let t: TestApp;
-
-beforeAll(async () => {
-  t = await startTestApp();
-});
-afterAll(async () => t.close());
+const t = useTestApp();
 beforeEach(() => {
   t.stub.setDown(false);
   t.stub.setCompletionError(null);
-  t.stub.setChat(keywordChat);
 });
 
 const suggest = (body: unknown) =>
@@ -158,21 +151,21 @@ describe("POST /v1/suggestions", () => {
     expect(res.status).toBe(404);
   });
 
-  it("503 llm_unavailable when the local runtime is down, without echoing content", async () => {
-    t.stub.setDown(true);
+  const unavailable = async () => {
     const f = fixture("dad-lunch");
     const res = await suggest({ email: f.email, categories: f.categories });
     expect(res.status).toBe(503);
     expect(res.body.error.code).toBe("llm_unavailable");
-    expect(JSON.stringify(res.body)).not.toContain("Grandma");
+    return res.body;
+  };
+
+  it("503 llm_unavailable when the local runtime is down, without echoing content", async () => {
+    t.stub.setDown(true);
+    expect(JSON.stringify(await unavailable())).not.toContain("Grandma");
   });
 
   it("says the answer was unusable, not that the model is down, when the runtime errors", async () => {
     t.stub.setCompletionError(500);
-    const f = fixture("dad-lunch");
-    const res = await suggest({ email: f.email, categories: f.categories });
-    expect(res.status).toBe(503);
-    expect(res.body.error.code).toBe("llm_unavailable");
-    expect(res.body.error.message).toMatch(/unusable answer/);
+    expect((await unavailable()).error.message).toMatch(/unusable answer/);
   });
 });

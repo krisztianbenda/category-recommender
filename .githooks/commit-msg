@@ -1,0 +1,8 @@
+#!/bin/sh
+# Rejects commit messages that are not Conventional Commits (scripts/conventional-commit.mjs).
+# Turn the repository's hooks on once per clone:  git config core.hooksPath .githooks
+if ! command -v node >/dev/null 2>&1; then
+  echo "commit-msg: node not found, so the message was not checked (CI still checks the PR title)" >&2
+  exit 0
+fi
+exec node "$(dirname "$0")/../scripts/conventional-commit.mjs" "$1"

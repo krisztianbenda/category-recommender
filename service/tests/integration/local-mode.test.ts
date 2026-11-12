@@ -4,12 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { request } from "undici";
 import { stringify } from "yaml";
 import { createApp, type App } from "../../src/app.js";
 import { loadConfig } from "../../src/config/load.js";
 import { ConfigError, validateConfig } from "../../src/config/schema.js";
 import { silentLogger } from "../../src/logging/logger.js";
+import { callJson } from "../helpers/http.js";
 import { keywordChat } from "../helpers/keyword-chat.js";
 import { startStubLlm, type StubLlm } from "../helpers/stub-llm.js";
 
@@ -26,18 +26,8 @@ const localConfig = (dataDir: string, server: Record<string, unknown> = {}) => (
   embeddings: { baseUrl: stub.url, model: "stub-embed" },
 });
 
-const call = async <T = any>(method: string, url: string, body?: unknown, host?: string) => {
-  const res = await request(`http://127.0.0.1:${port}${url}`, {
-    method: method as "GET",
-    headers: {
-      ...(body !== undefined ? { "content-type": "application/json" } : {}),
-      ...(host ? { host } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.body.text();
-  return { status: res.statusCode, body: (text ? JSON.parse(text) : undefined) as T };
-};
+const call = <T = any>(method: string, url: string, body?: unknown, host?: string) =>
+  callJson<T>(method, `http://127.0.0.1:${port}${url}`, body, { headers: host ? { host } : {} });
 
 beforeAll(async () => {
   stub = await startStubLlm();

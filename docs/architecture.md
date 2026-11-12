@@ -61,7 +61,7 @@ One process serves the API and the static web UI. Its layout under `service/src/
 | `platform/` | OS-specific checks (macOS, Linux) behind one interface |
 | `cli/` | `catrec backup` and `catrec restore` |
 
-`service/web/` holds the static UI (plain HTML, CSS and JavaScript modules, no build step). `service/tests/` holds unit, contract and integration tests that run against a stub model, plus the `eval` harness that runs against the real local models with synthetic fixtures.
+`service/web/` holds the static UI (plain HTML, CSS and JavaScript modules, no build step). `service/tests/` holds unit, contract and integration tests that run against a stub model, end-to-end tests that start the built service and replay a synthetic session against it, plus the `eval` harness that runs against the real local models with synthetic fixtures.
 
 ### How a suggestion is made
 
@@ -144,8 +144,11 @@ service/            the recommender service and web UI
 mail-app/           the macOS Mail menu bar app
 fixtures/synthetic/ fabricated emails for tests and evaluation
 deploy/             config examples, launchd and systemd units, firewall rules
-scripts/            run-local.sh, fetch-models.sh, PKI helpers
+scripts/            run-local.sh, fetch-models.sh, PKI helpers, the commit message check
 docs/               architecture, operations, dependencies
 specs/              spec, plan, contracts and tasks per feature
 .specify/           Spec Kit templates and the constitution
+.github/workflows/  CI: tests, end-to-end tests, duplication and pull request title checks
+.githooks/          the commit-msg hook (git config core.hooksPath .githooks)
+package.json        repository-wide checks (commit messages, code duplication), not a component
 ```

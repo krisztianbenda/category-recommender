@@ -171,6 +171,29 @@ struct SessionTests {
         return s
     }
 
+    /// Says whether the session has finished, that is, closed its window.
+    private func watchFinish(_ s: RecommenderSession) -> () -> Bool {
+        var finished = false
+        s.onFinish = { finished = true }
+        return { finished }
+    }
+
+    /// Starts a session whose suggestion the model holds back, and returns once it was asked for.
+    private func startedWhileTheModelThinks() async -> (RecommenderSession, Task<Void, Never>) {
+        api.holdSuggestion = true
+        let s = session()
+        let startTask = s.start()
+        while !api.suggestStarted { await Task.yield() }
+        return (s, startTask)
+    }
+
+    /// Lets the held-back model answer, and waits for the feedback the session sends after it.
+    private func releaseTheModel(_ startTask: Task<Void, Never>) async {
+        api.openGate()
+        await startTask.value
+        for _ in 0..<50 where api.feedbacks.isEmpty { await Task.yield() }
+    }
+
     @Test func importsLabelsAndRecommends() async {
         let s = await started()
         #expect(s.stage == .ready)
@@ -211,14 +234,13 @@ struct SessionTests {
     @Test func filingInAFolderAccountMovesTheEmailWithoutArchiving() async {
         useFolderAccount()
         let s = await started()
-        var finished = false
-        s.onFinish = { finished = true }
+        let finished = watchFinish(s)
         await s.acceptHighlighted()?.value
         #expect(mail.filed.first?.target == "Family")
         #expect(mail.filed.first?.items == [FileItem(id: 1, mailbox: "Beérkezett", mode: .move)])
         #expect(mail.archived.isEmpty)
         #expect(api.feedbacks.first?.decision == .confirm)
-        #expect(finished)
+        #expect(finished())
     }
 
     @Test func keepingInTheInboxFilesACopyInAFolderAccount() async {
@@ -247,15 +269,14 @@ struct SessionTests {
 
     @Test func acceptingTheRecommendationFilesAndConfirms() async {
         let s = await started()
-        var finished = false
-        s.onFinish = { finished = true }
+        let finished = watchFinish(s)
         await s.acceptHighlighted()?.value
         #expect(mail.filed.first?.target == "Family")
         #expect(mail.filed.first?.items == [FileItem(id: 1, mailbox: "INBOX", mode: .move)])
         #expect(api.feedbacks.first?.decision == .confirm)
         #expect(api.feedbacks.first?.id == "S1")
         #expect(api.feedbacks.first?.email == api.suggestCalls.first)
-        #expect(finished)
+        #expect(finished())
     }
 
     @Test func pickingAnotherLabelRecordsACorrection() async {
@@ -282,12 +303,11 @@ struct SessionTests {
     @Test func withoutPermissionToArchiveTheWindowSaysSoAndStillLearns() async {
         mail.archiveResult = .notAllowed
         let s = await started()
-        var finished = false
-        s.onFinish = { finished = true }
+        let finished = watchFinish(s)
         await s.acceptHighlighted()?.value
         #expect(mail.filed.count == 1)
         #expect(api.feedbacks.first?.decision == .confirm)
-        #expect(!finished)
+        #expect(!finished())
         #expect(s.notice?.contains("Accessibility") == true)
         #expect(s.acceptHighlighted() == nil)
     }
@@ -452,11 +472,10 @@ struct SessionTests {
     @Test func aFailedFilingTeachesNothingAndKeepsTheWindow() async {
         mail.fileError = MailError.script(number: -1, message: "nope")
         let s = await started()
-        var finished = false
-        s.onFinish = { finished = true }
+        let finished = watchFinish(s)
         await s.acceptHighlighted()?.value
         #expect(api.feedbacks.isEmpty)
-        #expect(!finished)
+        #expect(!finished())
         #expect(s.notice?.hasPrefix("Not filed") == true)
         #expect(!s.busy)
     }
@@ -464,32 +483,25 @@ struct SessionTests {
     @Test func aFailedLearningStepSaysSoAndDoesNotRefile() async {
         api.feedbackError = ServiceError.unreachable
         let s = await started()
-        var finished = false
-        s.onFinish = { finished = true }
+        let finished = watchFinish(s)
         await s.acceptHighlighted()?.value
         #expect(mail.filed.count == 1)
-        #expect(!finished)
+        #expect(!finished())
         #expect(s.notice?.hasPrefix("Filed") == true)
         #expect(s.acceptHighlighted() == nil)
     }
 
     @Test func filingDoesNotWaitForTheModel() async {
-        api.holdSuggestion = true
-        let s = session()
-        var finished = false
-        s.onFinish = { finished = true }
-        let startTask = s.start()
-        while !api.suggestStarted { await Task.yield() }
+        let (s, startTask) = await startedWhileTheModelThinks()
+        let finished = watchFinish(s)
         #expect(s.stage == .ready)
         #expect(s.recommendation == .thinking)
         let row = s.rows.first { $0.title == "Gadgets" }!
         await s.accept(row)?.value
         #expect(mail.filed.first?.target == "Gadgets")
-        #expect(finished)
+        #expect(finished())
         #expect(api.feedbacks.isEmpty)
-        api.openGate()
-        await startTask.value
-        for _ in 0..<50 where api.feedbacks.isEmpty { await Task.yield() }
+        await releaseTheModel(startTask)
         #expect(api.feedbacks.first?.decision == .choose("Gadgets"))
     }
 
@@ -497,13 +509,12 @@ struct SessionTests {
         backend.error = ServiceError.unreachable
         let s = await started()
         if case .unavailable = s.recommendation {} else { Issue.record("expected unavailable") }
-        var finished = false
-        s.onFinish = { finished = true }
+        let finished = watchFinish(s)
         let row = s.rows.first { $0.title == "Gadgets" }!
         await s.accept(row)?.value
         #expect(mail.filed.first?.target == "Gadgets")
         #expect(api.feedbacks.isEmpty)
-        #expect(finished)
+        #expect(finished())
     }
 
     @Test func aFailedRecommendationStillAllowsFilingByHand() async {
@@ -783,14 +794,13 @@ struct SessionTests {
     @Test func acceptingASuggestionToDeleteMovesItToTheTrashAndLearnsIt() async {
         api.suggestion = Self.deleteSuggestion()
         let s = await started()
-        var finished = false
-        s.onFinish = { finished = true }
+        let finished = watchFinish(s)
         await s.acceptHighlighted()?.value
         #expect(mail.movedToTrash == [["m1@example.test"]])
         #expect(mail.filed.isEmpty)
         #expect(mail.archived.isEmpty)
         #expect(api.feedbacks.map(\.decision) == [.delete])
-        #expect(finished)
+        #expect(finished())
         #expect(s.acceptHighlighted() == nil)
     }
 
@@ -822,19 +832,13 @@ struct SessionTests {
     }
 
     @Test func movingToTheTrashDoesNotWaitForTheModel() async {
-        api.holdSuggestion = true
-        let s = session()
-        var finished = false
-        s.onFinish = { finished = true }
-        let startTask = s.start()
-        while !api.suggestStarted { await Task.yield() }
+        let (s, startTask) = await startedWhileTheModelThinks()
+        let finished = watchFinish(s)
         await s.moveToTrash()?.value
         #expect(mail.movedToTrash.count == 1)
-        #expect(finished)
+        #expect(finished())
         #expect(api.feedbacks.isEmpty)
-        api.openGate()
-        await startTask.value
-        for _ in 0..<50 where api.feedbacks.isEmpty { await Task.yield() }
+        await releaseTheModel(startTask)
         #expect(api.feedbacks.map(\.decision) == [.delete])
     }
 
@@ -842,11 +846,10 @@ struct SessionTests {
         api.suggestion = Self.deleteSuggestion()
         mail.trashResult = .notAllowed
         let s = await started()
-        var finished = false
-        s.onFinish = { finished = true }
+        let finished = watchFinish(s)
         await s.acceptHighlighted()?.value
         #expect(api.feedbacks.isEmpty)
-        #expect(!finished)
+        #expect(!finished())
         #expect(s.notice?.contains("Accessibility") == true)
         // The owner can fix the permission and try again.
         mail.trashResult = .trashed

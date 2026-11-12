@@ -1,8 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../../context.js";
-import { categoryPathSchema, idSchema } from "../schemas.js";
+import { categoryPathSchema, idParams } from "../schemas.js";
 
-const idParams = { type: "object", required: ["id"], properties: { id: idSchema } } as const;
 const nameSchema = { type: "string", minLength: 1, maxLength: 80 } as const;
 
 export function categorySetRoutes(app: FastifyInstance, ctx: AppContext): void {

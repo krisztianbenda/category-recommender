@@ -15,5 +15,6 @@ if [[ "$(xcode-select -p)" == /Library/Developer/CommandLineTools ]]; then
          -Xlinker -rpath -Xlinker "$CLT/usr/lib")
 fi
 
-swift test --disable-xctest --enable-swift-testing "${ARGS[@]}" "$@"
-node --test tests/*.test.mjs
+# ${ARGS[@]+...}: an empty array is "unbound" under set -u in the bash 3.2 that macOS ships.
+swift test --disable-xctest --enable-swift-testing ${ARGS[@]+"${ARGS[@]}"} "$@"
+node --test Tests/*.test.mjs

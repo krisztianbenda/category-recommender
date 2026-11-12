@@ -138,7 +138,14 @@ func driveKeyboard(session: RecommenderSession, controller: PanelController, mai
         NSApp.postEvent(event, atStart: false)
         try? await Task.sleep(nanoseconds: 150_000_000)
     }
+    func waitUntilClosed() async {
+        for _ in 0..<40 where controller.isOpen { try? await Task.sleep(nanoseconds: 100_000_000) }
+    }
     var report: [String: String] = [:]
+    func json() -> String {
+        let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])
+        return data.map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+    }
     let recommended = session.rows.first
     report["recommended"] = recommended?.title
     report["startsOnRecommended"] = String(session.highlightedID == recommended?.id)
@@ -161,18 +168,16 @@ func driveKeyboard(session: RecommenderSession, controller: PanelController, mai
         await press(51, "\u{7F}", .command)
         report["commandDeleteEditsTheSearch"] = String(session.query.isEmpty && mail.movedToTrash.isEmpty)
         await press(51, "\u{7F}", .command)
-        for _ in 0..<40 where controller.isOpen { try? await Task.sleep(nanoseconds: 100_000_000) }
+        await waitUntilClosed()
         report["commandDeleteMovedToTrash"] = String(mail.movedToTrash.count == 1 && mail.filed.isEmpty)
         report["windowClosedAfterTrash"] = String(!controller.isOpen)
-        let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])
-        return data.map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+        return json()
     }
 
     await press(36, "\r")  // Return
-    for _ in 0..<40 where controller.isOpen { try? await Task.sleep(nanoseconds: 100_000_000) }
+    await waitUntilClosed()
     report["returnFiledInto"] = mail?.filed.last?.target
     report["windowClosedAfterFiling"] = String(!controller.isOpen)
 
-    let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])
-    return data.map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+    return json()
 }

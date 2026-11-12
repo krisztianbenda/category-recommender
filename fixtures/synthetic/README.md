@@ -12,6 +12,7 @@ Rules (constitution, Principle II):
 | Directory | Used by | Content |
 |-----------|---------|---------|
 | `examples/` | contract tests, quickstart V1–V4 | four hand-written scenario emails |
+| `e2e/` | `npm run test:e2e` in `service/`, CI on every pull request | a short session of one owner, in order: topics, a new trip, a work habit and a deletion habit learned from feedback |
 | `reference/` | `npm run eval -- --suite reference` (SC-001) | ≥ 100 labelled emails, English + Hungarian |
 | `novel/` | `--suite novel` (SC-001a) | emails that fit no category, with the expected parent |
 | `injection/` | `--suite injection` (FR-019) | emails that try to instruct the model |

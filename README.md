@@ -107,14 +107,29 @@ Then remove `~/.catrec` and `/opt/catrec/models`.
 
 ## Development
 
+Turn on the repository's git hooks once per clone. The `commit-msg` hook rejects messages that are not [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/), such as `feat(web): keep typed content when switching tabs`:
+
 ```bash
-cd service && npm ci && npm test
+git config core.hooksPath .githooks
+```
+
+Run the checks that CI runs:
+
+```bash
+npm ci && npm test && npm run check:duplication
 ```
 
 ```bash
-mail-app/scripts/test.sh
+cd service && npm ci && npm run lint && npm test && npm run test:e2e
 ```
 
+```bash
+mail-app/scripts/test.sh && mail-app/Tests/e2e.sh
+```
+
+- `main` only changes through pull requests, which are squash-merged. A pull request can be merged when the **CI result** and **PR title** checks pass; no review is required. The title becomes the commit message on `main`, so it must be a Conventional Commit too.
+- CI ([`.github/workflows/`](.github/workflows/)) runs the service's lint and tests, the end-to-end tests, the Mail app's tests on macOS, the commit message check, and a code duplication check that fails above 0.15% ([`.jscpd.json`](.jscpd.json)).
+- `npm run test:e2e` builds the service and replays a short synthetic session ([`fixtures/synthetic/e2e/`](fixtures/synthetic/e2e/session.json)) against it with a stub model: suggestions, feedback, learned habits, deletion, a restart and deleting all data.
 - `service/` is Node.js 24 and TypeScript. `npm run lint` checks formatting and lint rules.
 - `mail-app/` is Swift, with no third-party packages.
 - Tests and examples use only the fabricated emails in [`fixtures/synthetic/`](fixtures/synthetic/README.md). Never add real emails, labels, addresses or learned data to the repository, an issue or a prompt to an AI assistant.

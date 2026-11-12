@@ -324,12 +324,15 @@ test("selection treats an error as nothing selected, unless Mail access is denie
   assert.equal(out.error.number, -1743);
 });
 
+const accountKinds = (call) =>
+  call({ command: "opening" }).result.accounts.map((a) => [a.name, a.kind]);
+
 test("every enabled account is offered, with whether it has labels or folders", () => {
   const { gmail, call } = setup();
-  assert.deepEqual(
-    call({ command: "opening" }).result.accounts.map((a) => [a.name, a.kind]),
-    [["iCloud", "folders"], ["Google", "gmail"]],
-  );
+  assert.deepEqual(accountKinds(call), [
+    ["iCloud", "folders"],
+    ["Google", "gmail"],
+  ]);
   gmail._enabled = false;
   assert.deepEqual(call({ command: "opening" }).result.accounts.map((a) => a.name), ["iCloud"]);
 });
@@ -342,10 +345,10 @@ test("an account without a server name, like Exchange, is still offered", () => 
   mail.accounts.serverName = () => {
     throw new Error("no such property");
   };
-  assert.deepEqual(
-    call({ command: "opening" }).result.accounts.map((a) => [a.name, a.kind]),
-    [["iCloud", "folders"], ["Google", "gmail"]],
-  );
+  assert.deepEqual(accountKinds(call), [
+    ["iCloud", "folders"],
+    ["Google", "gmail"],
+  ]);
 });
 
 test("recognises Gmail by address when the host is not Gmail's", () => {
@@ -630,11 +633,17 @@ test("label names cannot break out of the AppleScript text", () => {
   assert.match(script.source, /mailbox "Odd\\" & \(do shell script \\"x\\"\) & \\"" of account/);
 });
 
+/** Mail's selection is one filed email, and its Message menu has Archive. */
+function setupArchive() {
+  const env = setup();
+  const message = fakeMessage(1, env.inbox, { messageId: "mid-a" });
+  env.mail.selection = () => [message];
+  env.menu.titles = ["Archive"];
+  return env;
+}
+
 test("archive clicks Mail's Archive only when Mail's selection is exactly the filed emails", () => {
-  const { mail, inbox, menu, call } = setup();
-  const message = fakeMessage(1, inbox, { messageId: "mid-a" });
-  mail.selection = () => [message];
-  menu.titles = ["Archive"];
+  const { inbox, menu, call } = setupArchive();
   menu.onClick = () => inbox.messagesList.splice(0);
   const titles = ["Archive"];
   assert.equal(call({ command: "archive", account: "Google", messageIds: ["mid-a", "mid-b"], titles }).result.result, "selectionChanged");
@@ -644,10 +653,7 @@ test("archive clicks Mail's Archive only when Mail's selection is exactly the fi
 });
 
 test("archive reports when macOS does not allow it, and when Mail did not archive", () => {
-  const { mail, inbox, menu, call } = setup();
-  const message = fakeMessage(1, inbox, { messageId: "mid-a" });
-  mail.selection = () => [message];
-  menu.titles = ["Archive"];
+  const { menu, call } = setupArchive();
   menu.denied = true;
   assert.equal(call({ command: "archive", account: "Google", messageIds: ["mid-a"], titles: ["Archive"] }).result.result, "notAllowed");
   menu.denied = -1743;

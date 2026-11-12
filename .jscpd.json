@@ -1,0 +1,17 @@
+{
+  "threshold": 0.15,
+  "reporters": ["console", "threshold"],
+  "gitignore": true,
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.build/**",
+    "**/package-lock.json",
+    "**/*.md",
+    "**/*.json",
+    "fixtures/**",
+    "specs/**",
+    ".specify/**",
+    ".claude/**"
+  ]
+}

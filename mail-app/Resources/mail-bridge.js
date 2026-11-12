@@ -318,6 +318,18 @@ function errorNumber(e) {
   return match ? Number(match[1]) : 0;
 }
 
+/** A self-test step: runs `fn` and records in `steps` whether it passed, failed or threw. */
+function stepper(steps) {
+  return (name, fn) => {
+    try {
+      steps[name] = fn() ? 'pass' : 'fail';
+    } catch (e) {
+      steps[name] = 'error ' + errorNumber(e);
+    }
+    return steps[name] === 'pass';
+  };
+}
+
 /** Mail can report an error instead of an empty list when nothing is selected. */
 function currentSelection() {
   try {
@@ -662,14 +674,7 @@ const commands = {
       }
       return null;
     };
-    const step = (name, fn) => {
-      try {
-        steps[name] = fn() ? 'pass' : 'fail';
-      } catch (e) {
-        steps[name] = 'error ' + errorNumber(e);
-      }
-      return steps[name] === 'pass';
-    };
+    const step = stepper(steps);
 
     step('createMailbox', () => {
       if (!named(parent)) Mail.mailboxes.push(Mail.Mailbox({ name: parent }));
@@ -742,14 +747,7 @@ const commands = {
       const mailbox = resolve(account, path);
       return mailbox ? attempt(() => mailbox.messages.whose({ messageId })().length, 0) : 0;
     };
-    const step = (name, fn) => {
-      try {
-        steps[name] = fn() ? 'pass' : 'fail';
-      } catch (e) {
-        steps[name] = 'error ' + errorNumber(e);
-      }
-      return steps[name] === 'pass';
-    };
+    const step = stepper(steps);
     step('readSelection', () => messageId.length > 0);
     step('createLabel', () => {
       createMailbox(account, first);
@@ -794,14 +792,7 @@ function selftestFolders(account, ref, messageId) {
     const mailbox = resolve(account, path);
     return mailbox ? attempt(() => mailbox.messages.whose({ messageId })(), []) || [] : [];
   };
-  const step = (name, fn) => {
-    try {
-      steps[name] = fn() ? 'pass' : 'fail';
-    } catch (e) {
-      steps[name] = 'error ' + errorNumber(e);
-    }
-    return steps[name] === 'pass';
-  };
+  const step = stepper(steps);
   step('readSelection', () => messageId.length > 0);
   step('inboxIsKnown', () => inboxName(ref.account) === ref.mailbox);
   step('systemFoldersAreRecognised', () => systemNames(ref.account).length > 1);
