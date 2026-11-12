@@ -28,7 +28,7 @@ function fail(number, message) {
 
 // These commands' output may be shared while debugging, and Mail's own error texts can quote
 // mailbox names, so they report error numbers and this script's fixed messages only.
-const CHECKS = ['diagnose', 'selftestLocal', 'selftestGmail', 'selftestAccount'];
+const CHECKS = ['diagnose', 'selftestLocal', 'selftestGmail', 'selftestAccount', 'selftestRecover', 'selftestLocate'];
 
 const NOT_FOUND = -1728; // Apple Events "can't get"
 
@@ -124,24 +124,25 @@ function inboxName(accountName) {
   return specialName(() => Mail.inbox, accountName);
 }
 
-function systemNames(accountName) {
+/** `inbox` is the account's Inbox name when the caller has it already. */
+function systemNames(accountName, inbox = inboxName(accountName)) {
   const collections = [
-    () => Mail.inbox,
     () => Mail.sentMailbox,
     () => Mail.draftsMailbox,
     () => Mail.junkMailbox,
     () => Mail.trashMailbox,
     () => Mail.outbox,
   ];
-  const names = collections.map((c) => specialName(c, accountName)).filter((name) => name);
+  const names = [inbox].concat(collections.map((c) => specialName(c, accountName))).filter((name) => name);
   return names.filter((name, i) => names.indexOf(name) === i);
 }
 
 function labelsOf(accountName) {
+  const inbox = inboxName(accountName);
   return {
     mailboxes: allPaths(Mail.accounts.byName(accountName)),
-    system: systemNames(accountName),
-    inbox: inboxName(accountName),
+    system: systemNames(accountName, inbox),
+    inbox,
   };
 }
 
@@ -155,6 +156,14 @@ function isAccount(object) {
   return attempt(() => (object.id(), true), false);
 }
 
+/**
+ * Adds a parent's name in front of a path. Gmail names a nested mailbox by its short name. Other
+ * accounts name it by its whole path, "Parent/Child", which then has the parent in it already.
+ */
+function prepend(parts, parentName) {
+  if (parts[0].indexOf(parentName + '/') !== 0) parts.unshift(parentName);
+}
+
 function pathOf(mailbox) {
   const parts = [mailbox.name()];
   let current = mailbox;
@@ -163,7 +172,7 @@ function pathOf(mailbox) {
     if (!parent || isAccount(parent)) break;
     const name = attempt(() => parent.name(), null);
     if (!name) break;
-    parts.unshift(name);
+    prepend(parts, name);
     current = parent;
   }
   return parts.join('/');
@@ -187,7 +196,7 @@ function allPaths(account) {
     let up = parents[i];
     for (let depth = 0; up && depth < MAX_DEPTH; depth++) {
       if (ambiguous.has(up)) return pathOf(account.mailboxes[i]);
-      parts.unshift(up);
+      prepend(parts, up);
       up = parentOf.get(up);
     }
     return parts.join('/');
@@ -220,11 +229,14 @@ function resolve(account, path) {
     }
     if (current) return current;
   }
-  // System folders: their parent is not listed, so find them through the flat listing.
+  // Gmail's system folders: their parent is not listed, so find them through the flat listing.
+  // So are nested folders of accounts that name them by their whole path.
   const short = segments[segments.length - 1];
   const names = account.mailboxes.name();
   for (let i = 0; i < names.length; i++) {
-    if (names[i] === short && pathOf(account.mailboxes[i]) === path) return account.mailboxes[i];
+    if ((names[i] === short || names[i] === path) && pathOf(account.mailboxes[i]) === path) {
+      return account.mailboxes[i];
+    }
   }
   return null;
 }
@@ -264,22 +276,29 @@ function appleScriptText(text) {
 }
 
 function showMailbox(account, path) {
-  let reference = 'account ' + appleScriptText(account.name());
+  const owner = 'account ' + appleScriptText(account.name());
+  let nested = owner;
   for (const segment of path.split('/')) {
-    reference = 'mailbox ' + appleScriptText(segment) + ' of ' + reference;
+    nested = 'mailbox ' + appleScriptText(segment) + ' of ' + nested;
   }
-  // JXA cannot set this property, so this one step is AppleScript. All names are escaped above.
-  const source = [
-    'tell application "Mail"',
-    'if (count of message viewers) is 0 then make new message viewer',
-    'set selected mailboxes of message viewer 1 to {' + reference + '}',
-    'end tell',
-  ].join('\n');
-  $.NSAppleScript.alloc.initWithSource($(source)).executeAndReturnError(Ref());
-  return until(() => {
+  // Accounts that name a nested mailbox by its whole path take that path as one name.
+  const references = [nested, 'mailbox ' + appleScriptText(path) + ' of ' + owner];
+  const shown = () => {
     const selected = attempt(() => Mail.messageViewers[0].selectedMailboxes(), []) || [];
     return selected.length === 1 && pathOf(selected[0]) === path;
-  }, 3);
+  };
+  for (const reference of references.filter((r, i) => references.indexOf(r) === i)) {
+    // JXA cannot set this property, so this one step is AppleScript. All names are escaped above.
+    const source = [
+      'tell application "Mail"',
+      'if (count of message viewers) is 0 then make new message viewer',
+      'set selected mailboxes of message viewer 1 to {' + reference + '}',
+      'end tell',
+    ].join('\n');
+    $.NSAppleScript.alloc.initWithSource($(source)).executeAndReturnError(Ref());
+    if (until(shown, 3)) return true;
+  }
+  return false;
 }
 
 /**
@@ -530,8 +549,9 @@ const commands = {
   },
 
   file(input) {
-    const account = accountNamed(input.account);
-    return { filed: fileMessages(account, input.target, input.items, kindOf(input.account)) };
+    const kind = kindOf(input.account);
+    const account = Mail.accounts.byName(input.account);
+    return { filed: fileMessages(account, input.target, input.items, kind) };
   },
 
   create(input) {
@@ -824,8 +844,10 @@ const commands = {
 
 commands.selftestAccount = commands.selftestGmail;
 
-// The same check for an account with folders: moves the selected Inbox email into a temporary
-// folder and back. The folders stay for the owner to delete, empty.
+// The same check for an account with folders. The owner's email never moves: a copy of it goes to
+// a temporary folder, and that copy is what gets moved, into a folder under it. A move once took an
+// owner's email out of the Inbox and Mail never showed it again, so the original is left alone.
+// The folders stay, holding the copy, for the owner to delete.
 function selftestFolders(account, ref, messageId) {
   const steps = { foundInboxCopy: 'pass' };
   const first = SELF_TEST_PREFIX + 'folder';
@@ -847,21 +869,115 @@ function selftestFolders(account, ref, messageId) {
     return resolve(account, nested) !== null;
   });
   step('nestedFolderHasFullPath', () => allPaths(account).indexOf(nested) >= 0);
-  const moved = step('moveThroughFiling', () => {
-    fileMessages(account, nested, [{ id: ref.id, mailbox: ref.mailbox, mode: 'move' }], 'folders');
-    return until(() => copies(nested).length > 0, 30);
+  // Counted before and after, so that copies left by an earlier run on the same email pass nothing.
+  const inFirst = copies(first).length;
+  const inNested = copies(nested).length;
+  const copied = step('copyThroughFiling', () => {
+    fileMessages(account, first, [{ id: ref.id, mailbox: ref.mailbox, mode: 'copy' }], 'folders');
+    return until(() => copies(first).length > inFirst, 60);
   });
-  step('leftTheInbox', () => until(() => copies(ref.mailbox).length === 0, 30));
-  if (moved) {
-    step('backToInbox', () => {
-      moveMessage(copies(nested)[0], resolve(account, ref.mailbox));
-      return until(() => copies(ref.mailbox).length > 0, 30);
+  if (copied) {
+    step('moveThroughFiling', () => {
+      const copy = copies(first)[0];
+      fileMessages(account, nested, [{ id: copy.id(), mailbox: first, mode: 'move' }], 'folders');
+      return until(() => copies(nested).length > inNested, 60);
     });
-    step('leftTheFolder', () => until(() => copies(nested).length === 0, 30));
+    step('leftTheFolder', () => until(() => copies(first).length === inFirst, 60));
   }
-  step('inInboxAtTheEnd', () => copies(ref.mailbox).length > 0);
-  return { steps };
+  step('originalStayedInInbox', () => copies(ref.mailbox).length > 0);
+  // The self-test's own folders, as Mail lists them: fixed names, nothing of the owner's.
+  const own = (name) => String(name).indexOf(SELF_TEST_PREFIX) === 0;
+  const listed = account.mailboxes.name().filter(own);
+  return { steps, listed, paths: allPaths(account).filter(own) };
 }
+
+// Puts back what a self-test of a folder account left in its own folders: every email in a folder
+// whose name starts with the self-test's prefix goes to that account's Inbox, unless the Inbox has
+// it already, as it has the originals of the copies the self-test now makes. Only the self-test
+// puts emails there. Reports counts only.
+commands.selftestRecover = function () {
+  const report = [];
+  for (const entry of mailAccounts().filter((a) => a.kind === 'folders')) {
+    const account = Mail.accounts.byName(entry.name);
+    const inboxPath = inboxName(entry.name);
+    const inbox = inboxPath ? topLevel(account, inboxPath) : null;
+    const names = account.mailboxes.name();
+    const folders = [];
+    names.forEach((name, i) => {
+      if (String(name).indexOf(SELF_TEST_PREFIX) === 0) folders.push(account.mailboxes[i]);
+    });
+    const held = () =>
+      folders.map((folder) => attempt(() => folder.messages.length, -1)).reduce((x, y) => Math.max(x, y), 0);
+    const one = { folders: folders.length, inboxFound: inbox !== null, found: held(), moved: 0, inInbox: 0, errors: [] };
+    if (inbox) {
+      const seen = new Set();
+      for (const folder of folders) {
+        const messages = attempt(() => folder.messages(), []) || [];
+        for (const message of messages) {
+          const key = attempt(() => message.messageId(), null) || 'id-' + attempt(() => message.id(), 0);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const messageId = attempt(() => message.messageId(), null);
+          if (messageId && holds(inbox, messageId)) {
+            one.inInbox++;
+            continue;
+          }
+          try {
+            moveMessage(message, inbox);
+            one.moved++;
+          } catch (e) {
+            one.errors.push(errorNumber(e));
+          }
+        }
+      }
+      one.left = until(() => held() <= one.inInbox, 30) ? 0 : held();
+    }
+    report.push(one);
+  }
+  return { accounts: report };
+};
+
+// Where an email that a self-test moved could be: asks Mail to check the folder accounts again,
+// then counts the emails in each of the self-test's folders, and in Mail's own "Recovered Messages"
+// under On My Mac, where Mail puts what it could not store in an account. Counts only.
+commands.selftestLocate = function () {
+  const count = (box) => {
+    try {
+      return box.messages.length;
+    } catch (e) {
+      return 'error ' + errorNumber(e);
+    }
+  };
+  const accounts = mailAccounts()
+    .filter((a) => a.kind === 'folders')
+    .map((entry) => {
+      const account = Mail.accounts.byName(entry.name);
+      const synchronized = attempt(() => (Mail.synchronize({ with: account }), true), false);
+      const indexes = [];
+      account.mailboxes.name().forEach((name, i) => {
+        if (String(name).indexOf(SELF_TEST_PREFIX) === 0) indexes.push(i);
+      });
+      const counts = () => indexes.map((i) => count(account.mailboxes[i]));
+      const before = counts();
+      until(() => counts().some((n) => n > 0), 25);
+      const inboxPath = inboxName(entry.name);
+      const inbox = inboxPath ? topLevel(account, inboxPath) : null;
+      return {
+        synchronized,
+        selfTestFolders: indexes.length,
+        nested: indexes.map((i) => account.mailboxes.name()[i].indexOf('/') > 0),
+        before,
+        after: counts(),
+        inbox: inbox ? count(inbox) : null,
+      };
+    });
+  const localNames = attempt(() => Mail.mailboxes.name(), []) || [];
+  const recovered = [];
+  localNames.forEach((name, i) => {
+    if (/recovered|helyre|wiederher|r\u00e9cup|recuper/i.test(String(name))) recovered.push(count(Mail.mailboxes[i]));
+  });
+  return { accounts, localMailboxes: localNames.length, recoveredMailboxes: recovered };
+};
 
 function run(argv) {
   let input = {};

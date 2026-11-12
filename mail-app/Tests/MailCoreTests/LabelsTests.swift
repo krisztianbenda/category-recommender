@@ -77,19 +77,21 @@ struct LabelsTests {
     }
 
     @Test func filingRules() {
-        #expect(Filing.mode(source: "INBOX", keepInInbox: false) == .move)
-        #expect(Filing.mode(source: "Family", keepInInbox: false) == .copy)
-        #expect(Filing.mode(source: "INBOX", keepInInbox: true) == .copy)
-        // Folders: an email is in one folder, so it moves, unless a copy is to stay in the Inbox.
-        #expect(Filing.mode(inInbox: true, keepInInbox: false, kind: .folders) == .move)
-        #expect(Filing.mode(inInbox: true, keepInInbox: true, kind: .folders) == .copy)
-        #expect(Filing.mode(inInbox: false, keepInInbox: true, kind: .folders) == .move)
+        #expect(Filing.mode(inInbox: LabelText.isInbox("INBOX"), keepInInbox: false, kind: .gmail) == .move)
+        #expect(Filing.mode(inInbox: LabelText.isInbox("Family"), keepInInbox: false, kind: .gmail) == .copy)
+        #expect(Filing.mode(inInbox: LabelText.isInbox("INBOX"), keepInInbox: true, kind: .gmail) == .copy)
+        // Folders: copy only, wherever the email is, until moving is proven safe.
+        for inInbox in [true, false] {
+            for keep in [true, false] {
+                #expect(Filing.mode(inInbox: inInbox, keepInInbox: keep, kind: .folders) == .copy)
+            }
+        }
         #expect(Filing.mode(inInbox: false, keepInInbox: false, kind: .gmail) == .copy)
         #expect(LabelSync.setName(address: "a@b.example") == "Gmail: a@b.example")
         #expect(LabelSync.setName(address: "a@b.example", kind: .folders) == "Mail: a@b.example")
-        #expect(Filing.mode(source: "[Gmail]/All Mail", keepInInbox: false) == .copy)
-        #expect(Filing.mode(source: "All Mail", keepInInbox: false) == .copy)
-        #expect(Filing.mode(source: "[Gmail]/Összes levél", keepInInbox: false) == .copy)
+        #expect(Filing.mode(inInbox: LabelText.isInbox("[Gmail]/All Mail"), keepInInbox: false, kind: .gmail) == .copy)
+        #expect(Filing.mode(inInbox: LabelText.isInbox("All Mail"), keepInInbox: false, kind: .gmail) == .copy)
+        #expect(Filing.mode(inInbox: LabelText.isInbox("[Gmail]/Összes levél"), keepInInbox: false, kind: .gmail) == .copy)
     }
 
     @Test func typedNamesAreCleaned() {
@@ -218,6 +220,21 @@ struct FolderAccountTests {
         #expect(catalog.entries.first?.path == "Beérkezett\(LabelText.deepSeparator)Projects")
         #expect(catalog.entries.allSatisfy { $0.existsInAccount })
         #expect(!catalog.entries.contains { $0.path.contains("/") && $0.path.hasPrefix("Beérkezett") })
+    }
+
+    @Test func aTypedFolderInsideTheInboxIsPlacedWhereTheCatalogWillPutIt() throws {
+        let catalog = LabelCatalog(
+            mailboxes: ["Beérkezett", "Elküldött", "Bills"], system: ["Beérkezett", "Elküldött"], inbox: "Beérkezett")
+        let new = try #require(catalog.newCategory(forMailbox: "Beérkezett/Receipts"))
+        let after = LabelCatalog(
+            mailboxes: ["Beérkezett", "Beérkezett/Receipts", "Elküldött", "Bills"], system: ["Beérkezett", "Elküldött"],
+            inbox: "Beérkezett")
+        #expect(new.category.path == after.entry(forPath: new.category.path)?.path)
+        #expect(after.entry(forPath: new.category.path)?.mailbox == "Beérkezett/Receipts")
+        #expect(catalog.isAccountFolder("Elküldött"))
+        #expect(catalog.isAccountFolder("Elküldött/Old"))
+        #expect(!catalog.isAccountFolder("Beérkezett/Receipts"))
+        #expect(!catalog.isAccountFolder("Bills"))
     }
 
     @Test func foldersInsideAnInboxNamedInboxStandOnTheirOwnToo() {

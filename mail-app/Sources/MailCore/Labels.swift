@@ -103,6 +103,9 @@ public struct LabelCatalog: Equatable, Sendable {
 
     public let entries: [LabelEntry]
     public let limit: Int
+    /// The account's own folders, by the names they have there.
+    private let system: Set<String>
+    private let inbox: String?
 
     /// `system` holds the account's own Inbox, Sent, Drafts, Junk and Trash by the names they have
     /// there, which differ by provider and language. They and what is inside them are left out,
@@ -112,6 +115,8 @@ public struct LabelCatalog: Equatable, Sendable {
         limit: Int = LabelCatalog.defaultLimit
     ) {
         self.limit = limit
+        self.system = Set(system)
+        self.inbox = inbox
         let special = Set(system)
         func isInboxName(_ name: String) -> Bool { name == inbox || LabelText.isInbox(name) }
         let real = Set(mailboxes).filter { mailbox in
@@ -150,7 +155,7 @@ public struct LabelCatalog: Equatable, Sendable {
             }
             if isInboxName(top) {
                 // The Inbox itself is not a place to file under, so its folders stand on their own.
-                let claimed = claim(parent: nil, name: parts.joined(separator: LabelText.deepSeparator))
+                let claimed = claim(parent: nil, name: Self.inboxFolderName(parts))
                 out.append(
                     LabelEntry(mailbox: mailbox, path: claimed.path, key: claimed.key, existsInAccount: true))
                 continue
@@ -178,6 +183,19 @@ public struct LabelCatalog: Equatable, Sendable {
         return entries.first { $0.key == key }
     }
 
+    /// A folder inside the Inbox is a top-level category named after its whole path.
+    private static func inboxFolderName(_ parts: [String]) -> String {
+        parts.joined(separator: LabelText.deepSeparator)
+    }
+
+    private func isInboxName(_ name: String) -> Bool { name == inbox || LabelText.isInbox(name) }
+
+    /// One of the account's own folders, such as Sent under its local name. Never a place to file.
+    public func isAccountFolder(_ mailbox: String) -> Bool {
+        let top = String(mailbox.split(separator: "/").first ?? "")
+        return system.contains(mailbox) || (system.contains(top) && !isInboxName(top))
+    }
+
     public func isConsidered(_ entry: LabelEntry) -> Bool {
         considered.contains { $0.key == entry.key }
     }
@@ -192,6 +210,9 @@ public struct LabelCatalog: Equatable, Sendable {
         guard let top = parts.first else { return nil }
         if parts.count == 1 {
             return (NewCategory(parent: nil, name: LabelText.fit(top)), true)
+        }
+        if isInboxName(top) {
+            return (NewCategory(parent: nil, name: LabelText.fit(Self.inboxFolderName(parts))), true)
         }
         let leaf = LabelText.fit(parts.dropFirst().joined(separator: LabelText.deepSeparator))
         let known = entries.first { $0.mailbox == top } ?? entry(forPath: top)
@@ -215,16 +236,13 @@ public enum Filing {
     /// "move"), unless the owner keeps it there. Anywhere else, including All Mail and other
     /// labels, filing only adds the label (FR-015): Mail cannot remove other labels by script.
     ///
-    /// In a folder account an email is in one folder, so filing moves it there from wherever it
-    /// is. Keeping it in the Inbox files a copy instead.
+    /// In a folder account filing only copies the email to the folder, and the email stays where
+    /// it is. A scripted move once took an owner's email out of the Inbox and Mail never showed it
+    /// again, so moving waits until it has been proven safe on real accounts.
     public static func mode(inInbox: Bool, keepInInbox: Bool, kind: AccountKind) -> FilingMode {
         switch kind {
         case .gmail: return inInbox && !keepInInbox ? .move : .copy
-        case .folders: return inInbox && keepInInbox ? .copy : .move
+        case .folders: return .copy
         }
-    }
-
-    public static func mode(source: String, keepInInbox: Bool) -> FilingMode {
-        mode(inInbox: LabelText.isInbox(source), keepInInbox: keepInInbox, kind: .gmail)
     }
 }

@@ -291,6 +291,7 @@ public final class RecommenderSession: ObservableObject {
                 .filter { LabelText.normalise($0.path).contains(search) }
                 .map { Self.row($0, .all) }
             if let typed = LabelText.cleanTyped(query), catalog.entry(forPath: typed) == nil,
+                !catalog.isAccountFolder(typed),
                 !catalog.entries.contains(where: { $0.mailbox.caseInsensitiveCompare(typed) == .orderedSame })
             {
                 out.append(

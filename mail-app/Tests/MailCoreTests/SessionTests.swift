@@ -273,13 +273,13 @@ struct SessionTests {
             Set(s.rows.map(\.title)) == ["Family", "Gadgets", "Beérkezett\(LabelText.deepSeparator)Projects"])
     }
 
-    @Test func filingInAFolderAccountMovesTheEmailWithoutArchiving() async {
+    @Test func filingInAFolderAccountCopiesTheEmailWithoutArchiving() async {
         useFolderAccount()
         let s = await started()
         let finished = watchFinish(s)
         await s.acceptHighlighted()?.value
         #expect(mail.filed.first?.target == "Family")
-        #expect(mail.filed.first?.items == [FileItem(id: 1, mailbox: "Beérkezett", mode: .move)])
+        #expect(mail.filed.first?.items == [FileItem(id: 1, mailbox: "Beérkezett", mode: .copy)])
         #expect(mail.archived.isEmpty)
         #expect(api.feedbacks.first?.decision == .confirm)
         #expect(finished())
@@ -293,11 +293,18 @@ struct SessionTests {
         #expect(mail.archived.isEmpty)
     }
 
-    @Test func refilingFromAnotherFolderMovesEvenWhenKeepingInTheInbox() async {
+    @Test func refilingFromAnotherFolderCopiesToo() async {
         useFolderAccount(from: "Gadgets", inInbox: false)
-        let s = await started(keepInInbox: true)
+        let s = await started()
         await s.acceptHighlighted()?.value
-        #expect(mail.filed.first?.items == [FileItem(id: 1, mailbox: "Gadgets", mode: .move)])
+        #expect(mail.filed.first?.items == [FileItem(id: 1, mailbox: "Gadgets", mode: .copy)])
+    }
+
+    @Test func typingTheAccountsOwnFolderUnderItsLocalNameOffersNoCreate() async {
+        useFolderAccount()
+        let s = await started()
+        s.query = "Elküldött"
+        #expect(!s.rows.contains { $0.section == .create })
     }
 
     @Test func aFolderInsideTheInboxIsFiledUnderItsExactMailbox() async {
