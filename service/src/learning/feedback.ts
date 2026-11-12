@@ -163,23 +163,26 @@ export class FeedbackService {
 
     const decidedAt = nowIso();
     const suggestedDelete = p.result.action === "delete";
+    const example = {
+      userId,
+      setId: p.setId,
+      outcome: resolved.outcome,
+      sender: input.email.from,
+      subject: input.email.subject,
+      snippet: input.email.body.trim().slice(0, SNIPPET_MAX),
+      embedding: p.embedding,
+      embeddingModel: d.embedder.model,
+      decidedAt,
+    };
     const { exampleId, categoryId, created } = d.db.transaction(() => {
       const { id: categoryId, created } =
         resolved.path === null
           ? { id: null, created: [] as string[] }
           : d.categories.upsertPath(p.setId, resolved.path);
       const exampleId = d.examples.insert({
-        userId,
-        setId: p.setId,
+        ...example,
         categoryId,
         suggestedCategoryPath: p.result.category,
-        outcome: resolved.outcome,
-        sender: input.email.from,
-        subject: input.email.subject,
-        snippet: input.email.body.trim().slice(0, SNIPPET_MAX),
-        embedding: p.embedding,
-        embeddingModel: d.embedder.model,
-        decidedAt,
       });
       d.decisions.insert({
         userId,
@@ -194,21 +197,7 @@ export class FeedbackService {
     })();
 
     d.pending.consume(suggestionId);
-    d.index.add(
-      toEntry({
-        id: exampleId,
-        userId,
-        setId: p.setId,
-        categoryId,
-        outcome: resolved.outcome,
-        sender: input.email.from,
-        subject: input.email.subject,
-        snippet: input.email.body.trim().slice(0, SNIPPET_MAX),
-        embedding: p.embedding,
-        embeddingModel: d.embedder.model,
-        decidedAt,
-      }),
-    );
+    d.index.add(toEntry({ ...example, id: exampleId, categoryId }));
 
     // Name embeddings for new categories feed the near-duplicate check; best effort.
     if (created.length) {

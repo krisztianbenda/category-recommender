@@ -1,8 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../../context.js";
-import { idSchema } from "../schemas.js";
-
-const idParams = { type: "object", required: ["id"], properties: { id: idSchema } } as const;
+import { idParams, idSchema } from "../schemas.js";
 
 export function learningDataRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get<{ Querystring: { categoryId?: string; limit: number; cursor?: string } }>(

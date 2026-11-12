@@ -1,14 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../../context.js";
 import type { FeedbackInput } from "../../learning/feedback.js";
-import { categoryPathSchema, emailSchema, idSchema } from "../schemas.js";
+import { categoryPathSchema, emailSchema, idParams } from "../schemas.js";
 
 export function feedbackRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post<{ Params: { id: string }; Body: FeedbackInput }>(
     "/v1/suggestions/:id/feedback",
     {
       schema: {
-        params: { type: "object", required: ["id"], properties: { id: idSchema } },
+        params: idParams,
         body: {
           type: "object",
           additionalProperties: false,

@@ -3,18 +3,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
-import { Agent, request } from "undici";
+import { Agent } from "undici";
+import { afterAll, beforeAll, beforeEach } from "vitest";
 import { stringify } from "yaml";
 import { createApp, type App } from "../../src/app.js";
 import { loadConfig } from "../../src/config/load.js";
 import { silentLogger, type Logger } from "../../src/logging/logger.js";
 import { createTestPki, type ClientCert, type TestPki } from "./certs.js";
+import { callJson, type Response } from "./http.js";
+import { keywordChat } from "./keyword-chat.js";
 import { startStubLlm, type StubLlm } from "./stub-llm.js";
 
-export interface Response<T = unknown> {
-  status: number;
-  body: T;
-}
+export type { Response } from "./http.js";
 
 export interface TestApp {
   app: App;
@@ -130,14 +130,9 @@ export async function startTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
       body?: unknown,
       client = owner,
     ): Promise<Response<T>> {
-      const res = await request(`https://127.0.0.1:${port}${url}`, {
-        method: method as "GET",
+      return callJson<T>(method, `https://127.0.0.1:${port}${url}`, body, {
         dispatcher: agentFor(client),
-        headers: body !== undefined ? { "content-type": "application/json" } : {},
-        body: body !== undefined ? JSON.stringify(body) : undefined,
       });
-      const text = await res.body.text();
-      return { status: res.statusCode, body: (text ? JSON.parse(text) : undefined) as T };
     },
     writeConfig(mutate) {
       mutate(rawConfig);
@@ -158,4 +153,22 @@ export async function startTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     },
   };
   return t;
+}
+
+/**
+ * Starts one service for the test file, with the keyword "model" before every test. The returned
+ * object forwards to the running service.
+ */
+export function useTestApp(opts: TestAppOptions = {}): TestApp {
+  let current: TestApp | undefined;
+  beforeAll(async () => {
+    current = await startTestApp(opts);
+  });
+  afterAll(async () => current?.close());
+  beforeEach(() => {
+    current!.stub.setChat(keywordChat);
+  });
+  return new Proxy({} as TestApp, {
+    get: (_target, key) => Reflect.get(current!, key),
+  });
 }

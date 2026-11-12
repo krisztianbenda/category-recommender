@@ -15,3 +15,10 @@ export const emailSchema = {
 export const categoryPathSchema = { type: "string", minLength: 1, maxLength: 200 } as const;
 
 export const idSchema = { type: "string", pattern: "^[0-9A-HJKMNP-TV-Z]{26}$" } as const;
+
+/** Path parameters of a route like `/v1/categories/:id`. */
+export const idParams = {
+  type: "object",
+  required: ["id"],
+  properties: { id: idSchema },
+} as const;

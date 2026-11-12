@@ -1,17 +1,8 @@
 // Contract: learned-data endpoints (contracts/http-api.md, US4, SC-007)
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { startTestApp, type TestApp } from "../helpers/app.js";
-import { keywordChat } from "../helpers/keyword-chat.js";
+import { describe, expect, it } from "vitest";
+import { useTestApp } from "../helpers/app.js";
 
-let t: TestApp;
-
-beforeAll(async () => {
-  t = await startTestApp();
-});
-afterAll(async () => t.close());
-beforeEach(() => {
-  t.stub.setChat(keywordChat);
-});
+const t = useTestApp();
 
 const CATS = ["Family", "Gadgets", "Finance"];
 const receipt = (n: number) => ({
