@@ -85,7 +85,15 @@ The service allows two levels and 60-character names. Gmail does not. A mapping 
 
 ### Sync
 
-Sync runs on each trigger and is a diff, so category ids and their learning survive. A missing label with no learned decisions is removed. A missing label with learned decisions is kept and reported, and the owner can forget it (constitution V: no automatic deletion of learned data). The set is named `Gmail: <address>`, which survives renaming the account in Mail.
+Sync runs on each trigger and is a diff, so category ids and their learning survive.
+
+Before the diff, it follows labels that were moved or renamed (FR-025). The account only shows a label gone and a new one, so they are paired on evidence, and the category is renamed or moved in place with `PATCH /v1/categories/{id}`. Its id, and so its learning, stay:
+
+1. **Renamed parent**: a parent that is gone, and a new top-level label that holds more than half of its children's names. The parent is renamed, and its children follow.
+2. **Moved label**: a gone label and a new one with the same own name (the last part of the path, folded), unique on both sides.
+3. **Renamed label**: for each remaining gone label with learned decisions, the app reads up to 5 of its learned emails (`GET /v1/learning-examples`, sender and subject only) and asks the bridge which new labels hold them. The one label that holds the most wins, if it holds any. Siblings are asked first. At most 10 labels and 20 mailboxes are checked, and only when labels changed.
+
+Moves run in an order the service accepts: to the top level first, then children, then labels that had children. A move the service refuses is left to the diff. A missing label with no learned decisions is removed. A missing label with learned decisions is kept and reported, and the owner can forget it (constitution V: no automatic deletion of learned data). The set is named `Gmail: <address>`, which survives renaming the account in Mail.
 
 ### Decisions and learning
 

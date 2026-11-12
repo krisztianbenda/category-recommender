@@ -130,6 +130,43 @@ struct LiveServiceTests {
         #expect(!detail.categories.contains { $0.path == "Család" })
     }
 
+    @Test func whatWasLearnedFollowsALabelThatIsMovedOrRenamed() async throws {
+        let client = try ServiceClient(baseURL: liveURL!)
+        let mail = FakeMail()
+        mail.mailboxes = ["INBOX", "Family", "Family/Baby", "Gadgets"]
+        mail.selectionResult = emailSelection(subject: "Newborn check-up", body: "The baby sees the paediatrician on Friday.")
+        var session = await run(mail: mail, client: client)
+        await session.accept(try #require(session.rows.first { $0.title == "Family/Baby" }))?.value
+        let setId = try #require(try await client.listSets().first { $0.name == LabelSync.setName(address: address) }?.id)
+        func learned(at path: String) async throws -> Int? {
+            try await client.getSet(id: setId).categories.first { $0.path == path }?.exampleCount
+        }
+        #expect(try await learned(at: "Family/Baby") == 1)
+
+        // Moved to another parent in the account.
+        mail.mailboxes = ["INBOX", "Family", "Kids", "Kids/Baby", "Gadgets"]
+        session = await run(mail: mail, client: client)
+        #expect(try await learned(at: "Kids/Baby") == 1)
+        #expect(try await learned(at: "Family/Baby") == nil)
+        #expect(session.orphaned.isEmpty)
+
+        // Renamed: Mail shows the learned email in the label with the new name.
+        mail.mailboxes = ["INBOX", "Family", "Kids", "Kids/Newborn", "Gadgets"]
+        mail.held = ["Kids/Newborn": ["Newborn check-up"]]
+        session = await run(mail: mail, client: client)
+        #expect(try await learned(at: "Kids/Newborn") == 1)
+        #expect(session.orphaned.isEmpty)
+
+        // The parent renamed: its children come along.
+        mail.mailboxes = ["INBOX", "Family", "Children", "Children/Newborn", "Gadgets"]
+        mail.held = [:]
+        session = await run(mail: mail, client: client)
+        #expect(try await learned(at: "Children/Newborn") == 1)
+        #expect(session.orphaned.isEmpty)
+        let paths = try await client.getSet(id: setId).categories.map(\.path)
+        #expect(!paths.contains { $0.hasPrefix("Kids") })
+    }
+
     @Test func anEmailLikeThoseInTheTrashIsSuggestedForDeletion() async throws {
         let client = try ServiceClient(baseURL: liveURL!)
         let mail = FakeMail()

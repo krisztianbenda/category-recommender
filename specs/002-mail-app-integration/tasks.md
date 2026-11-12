@@ -44,3 +44,10 @@
 - [x] T021 `--diagnose`, `--self-test-local` and `--self-test-gmail`
 - [x] T022 Run the checks that use real Mail, with the owner's approval
 - [x] T023 Docs: `mail-app/README.md`, `docs/operations.md`, root `README.md`
+
+## Phase 7: Moved and renamed labels (FR-025)
+
+- [x] T024 [US2] Pair gone and new labels by name in `mail-app/Sources/MailCore/LabelSync.swift` (`MovePlan`), and move or rename the category in place, with tests
+- [x] T025 [US2] `holding` in the bridge and `ScriptedMail`, and pairing a renamed label by its learned emails, with bridge tests and a `--self-test-local` step
+- [x] T026 [US2] End-to-end: move, rename and parent rename against the real service, in `LiveServiceTests`
+- [x] T027 Docs: `mail-app/README.md`, `docs/architecture.md`, this spec and plan

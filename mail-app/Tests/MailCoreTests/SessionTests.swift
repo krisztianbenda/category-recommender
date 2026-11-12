@@ -72,6 +72,15 @@ final class FakeMail: MailSource, @unchecked Sendable {
         movedToTrash.append(messageIds)
         return trashResult
     }
+    /// Which emails each mailbox holds, by subject.
+    var held: [String: [String]] = [:]
+    var holdingCalls: [(emails: [LearnedEmail], mailboxes: [String])] = []
+    var holdingError: Error?
+    func holding(_ emails: [LearnedEmail], in mailboxes: [String], account: String) async throws -> [Int] {
+        holdingCalls.append((emails, mailboxes))
+        if let holdingError { throw holdingError }
+        return mailboxes.map { box in emails.filter { (held[box] ?? []).contains($0.subject) }.count }
+    }
 }
 
 final class FakeAPI: RecommenderAPI, @unchecked Sendable {
@@ -120,6 +129,39 @@ final class FakeAPI: RecommenderAPI, @unchecked Sendable {
     func deleteCategory(id: String, cascade: Bool) async throws {
         deletedCategories.append(id)
         for key in categories.keys { categories[key]?.removeAll { $0.id == id } }
+    }
+    var updates: [(id: String, name: String?, parent: ParentChange)] = []
+    /// Ids whose update the service refuses, as with a name too close to another.
+    var refuseUpdates = Set<String>()
+    /// Like the service: the id and the example count stay, and children follow a renamed parent.
+    func updateCategory(id: String, name: String?, parent: ParentChange) async throws {
+        if refuseUpdates.contains(id) {
+            throw ServiceError.api(status: 400, code: "invalid_request", message: "too close")
+        }
+        updates.append((id, name, parent))
+        for key in categories.keys {
+            guard var list = categories[key], let index = list.firstIndex(where: { $0.id == id }) else { continue }
+            let item = list[index]
+            let parentId: String?
+            switch parent {
+            case .keep: parentId = item.parentId
+            case .topLevel: parentId = nil
+            case .under(let id): parentId = id
+            }
+            let own = name ?? LabelText.split(item.path).name
+            let path = parentId.flatMap { p in list.first { $0.id == p } }.map { "\($0.path)/\(own)" } ?? own
+            list[index] = CategoryItem(id: id, path: path, parentId: parentId, exampleCount: item.exampleCount)
+            list = list.map {
+                guard $0.parentId == id else { return $0 }
+                let childPath = "\(path)/\(LabelText.split($0.path).name)"
+                return CategoryItem(id: $0.id, path: childPath, parentId: id, exampleCount: $0.exampleCount)
+            }
+            categories[key] = list
+        }
+    }
+    var learned: [String: [LearnedEmail]] = [:]
+    func learnedEmails(categoryId: String, limit: Int) async throws -> [LearnedEmail] {
+        Array((learned[categoryId] ?? []).prefix(limit))
     }
     func suggest(email: Email, setId: String, allowDelete: Bool, trash: [TrashedEmail]) async throws -> Suggestion {
         suggestCalls.append(email)

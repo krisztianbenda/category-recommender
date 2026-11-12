@@ -137,6 +137,13 @@ public struct CategoryItem: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// Where a category goes when it is updated.
+public enum ParentChange: Equatable, Sendable {
+    case keep
+    case topLevel
+    case under(String)
+}
+
 public struct SetDetail: Codable, Equatable, Sendable {
     public let id: String
     public let name: String

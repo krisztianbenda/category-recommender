@@ -83,6 +83,10 @@ final class DemoMail: MailSource, @unchecked Sendable {
         TrashLookup(messages: trashed)
     }
 
+    func holding(_ emails: [LearnedEmail], in mailboxes: [String], account: String) async throws -> [Int] {
+        mailboxes.map { _ in 0 }
+    }
+
     func moveToTrash(messageIds: [String], account: String) async throws -> TrashResult {
         lock.withLock { movedToTrash.append(messageIds) }
         return .trashed
