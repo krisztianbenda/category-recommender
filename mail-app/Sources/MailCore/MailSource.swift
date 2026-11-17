@@ -10,10 +10,13 @@ public struct MailMessageRef: Codable, Equatable, Sendable {
     public let messageId: String?
     /// Whether it is in its account's Inbox, whatever the Inbox is called there. Nil if Mail did not say.
     public let inInbox: Bool?
+    /// In a batch's opening only: the sender and subject, so that rows show at once.
+    public let from: String?
+    public let subject: String?
 
     public init(
         id: Int, mailbox: String, account: String, date: Double = 0, messageId: String? = nil,
-        inInbox: Bool? = nil
+        inInbox: Bool? = nil, from: String? = nil, subject: String? = nil
     ) {
         self.id = id
         self.mailbox = mailbox
@@ -21,6 +24,8 @@ public struct MailMessageRef: Codable, Equatable, Sendable {
         self.date = date
         self.messageId = messageId
         self.inInbox = inInbox
+        self.from = from
+        self.subject = subject
     }
 
     public var isInInbox: Bool { inInbox ?? LabelText.isInbox(mailbox) }
@@ -79,11 +84,133 @@ public struct MailOpening: Codable, Equatable, Sendable {
     public let accounts: [MailAccount]
     /// The labels or folders of the selected email's account, if it is one of `accounts`.
     public let labels: AccountLabels?
+    /// In a batch's opening only: the mailboxes the owner was viewing in Mail, in that account.
+    public let viewed: [String]?
 
-    public init(selection: MailSelection, accounts: [MailAccount], labels: AccountLabels?) {
+    public init(selection: MailSelection, accounts: [MailAccount], labels: AccountLabels?, viewed: [String]? = nil) {
         self.selection = selection
         self.accounts = accounts
         self.labels = labels
+        self.viewed = viewed
+    }
+
+    /// More than one email selected: one recommendation each (specs/004-batch-recommendations).
+    public var isBatch: Bool { selection.total > 1 && selection.latest == nil && selection.messages.count > 1 }
+}
+
+// Batches (specs/004-batch-recommendations/contracts/mail-bridge.md).
+
+/// Where an email is in Mail: a message id within a mailbox path.
+public struct MessageLocation: Codable, Equatable, Sendable {
+    public let id: Int
+    public let mailbox: String
+
+    public init(id: Int, mailbox: String) {
+        self.id = id
+        self.mailbox = mailbox
+    }
+}
+
+/// The copy filing acts on, and whether it is in the Inbox.
+public struct Placement: Codable, Equatable, Sendable {
+    public let id: Int
+    public let mailbox: String
+    public let inInbox: Bool
+
+    public init(id: Int, mailbox: String, inInbox: Bool) {
+        self.id = id
+        self.mailbox = mailbox
+        self.inInbox = inInbox
+    }
+}
+
+/// One email of a batch, read: where filing acts, and its text. `found` is false when it is gone.
+public struct ReadEmail: Codable, Equatable, Sendable {
+    public let messageId: String?
+    public let found: Bool
+    public let placement: Placement?
+    public let email: Email?
+
+    public init(messageId: String?, found: Bool = true, placement: Placement? = nil, email: Email? = nil) {
+        self.messageId = messageId
+        self.found = found
+        self.placement = placement
+        self.email = email
+    }
+}
+
+/// An email that Archive or Delete must act on, with the ways Mail can be asked to select it.
+public struct SelectedEmail: Codable, Equatable, Sendable {
+    public let messageId: String
+    /// The message Mail was showing when the batch opened.
+    public let view: MessageLocation
+    /// The copy filing acts on.
+    public let placement: MessageLocation?
+
+    public init(messageId: String, view: MessageLocation, placement: MessageLocation?) {
+        self.messageId = messageId
+        self.view = view
+        self.placement = placement
+    }
+}
+
+public struct ArchiveOutcome: Codable, Equatable, Sendable {
+    public let result: ArchiveResult
+    /// With `stillThere`: the emails still in the Inbox.
+    public let left: [String]?
+    /// Mail's error numbers when it would not select the emails. Numbers only.
+    public let selectErrors: [Int]?
+
+    public init(result: ArchiveResult, left: [String]? = nil, selectErrors: [Int]? = nil) {
+        self.result = result
+        self.left = left
+        self.selectErrors = selectErrors
+    }
+}
+
+public struct TrashOutcome: Codable, Equatable, Sendable {
+    public let result: TrashResult
+    /// With `notInTrash`: the emails that did not arrive there.
+    public let left: [String]?
+    /// Mail's error numbers when it would not select the emails. Numbers only.
+    public let selectErrors: [Int]?
+
+    public init(result: TrashResult, left: [String]? = nil, selectErrors: [Int]? = nil) {
+        self.result = result
+        self.left = left
+        self.selectErrors = selectErrors
+    }
+}
+
+/// The Trash, read once for a whole batch.
+public struct TrashLookups: Codable, Equatable, Sendable {
+    /// The account's Trash was found. Without it, nothing is deleted.
+    public let found: Bool
+    /// The batch's emails that are in the Trash already.
+    public let inTrashIds: [String]
+    /// Emails in the Trash per lower-case sender address, newest first.
+    public let bySender: [String: [TrashedEmail]]
+
+    public init(found: Bool = true, inTrashIds: [String] = [], bySender: [String: [TrashedEmail]] = [:]) {
+        self.found = found
+        self.inTrashIds = inTrashIds
+        self.bySender = bySender
+    }
+
+    public func matches(for sender: String) -> [TrashedEmail] {
+        bySender[Self.address(sender)] ?? []
+    }
+
+    /// The address part of a From header, lower case, as the bridge and the service compare senders.
+    public static func address(_ from: String) -> String {
+        if let open = from.lastIndex(of: "<"), let close = from[open...].firstIndex(of: ">"),
+            from.index(after: open) < close
+        {
+            return from[from.index(after: open)..<close].trimmingCharacters(in: .whitespaces).lowercased()
+        }
+        let words = from.split(whereSeparator: { $0 == " " || $0 == "\"" || $0 == "<" || $0 == ">" })
+        if let bare = words.first(where: { $0.contains("@") }) { return bare.lowercased() }
+        return from.trimmingCharacters(in: .whitespaces).lowercased()
     }
 }
 
@@ -211,6 +338,18 @@ public protocol MailSource: Sendable {
     /// Moves the selected emails to the Trash with Mail's own Delete command, only if Mail's
     /// selection is exactly these emails and none of them is in the Trash already.
     func moveToTrash(messageIds: [String], account: String) async throws -> TrashResult
+
+    // Batches.
+
+    /// Finds the copy filing acts on and reads the text, for a few emails of a batch.
+    func read(_ refs: [MailMessageRef], viewed: [String], account: String) async throws -> [ReadEmail]
+    /// Selects exactly these emails in Mail, then takes them out of the Inbox with Mail's Archive.
+    func archive(_ emails: [SelectedEmail], viewed: [String], account: String) async throws -> ArchiveOutcome
+    /// Selects exactly these emails in Mail, then moves them to the Trash with Mail's Delete. Refuses
+    /// before selecting anything if one is in the Trash already.
+    func moveToTrash(_ emails: [SelectedEmail], viewed: [String], account: String) async throws -> TrashOutcome
+    /// Reads the Trash once for every sender of a batch, and which of these emails are there already.
+    func trashSimilar(senders: [String], messageIds: [String], account: String) async throws -> TrashLookups
 }
 
 public protocol BackendControl: Sendable {

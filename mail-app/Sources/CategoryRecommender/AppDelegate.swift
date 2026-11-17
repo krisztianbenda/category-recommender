@@ -14,13 +14,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     init(settings: AppSettings, environment: AppEnvironment) {
         self.settings = settings
         self.environment = environment
-        panel = PanelController(log: environment.log) {
-            let session = RecommenderSession(
-                mail: environment.mail, api: environment.client, backend: environment.backend,
-                keepInInbox: settings.keepInInbox)
-            session.onKeepInInboxChange = { settings.keepInInbox = $0 }
-            return session
-        }
+        panel = PanelController(
+            log: environment.log, mail: environment.mail,
+            makeSession: {
+                let session = RecommenderSession(
+                    mail: environment.mail, api: environment.client, backend: environment.backend,
+                    keepInInbox: settings.keepInInbox)
+                session.onKeepInInboxChange = { settings.keepInInbox = $0 }
+                return session
+            },
+            makeBatch: {
+                let batch = BatchSession(
+                    mail: environment.mail, api: environment.client, backend: environment.backend,
+                    keepInInbox: settings.keepInInbox)
+                batch.onKeepInInboxChange = { settings.keepInInbox = $0 }
+                return batch
+            })
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

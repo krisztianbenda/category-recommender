@@ -167,6 +167,51 @@ struct LiveServiceTests {
         #expect(!paths.contains { $0.hasPrefix("Kids") })
     }
 
+    /// A batch (specs/004-batch-recommendations): each email gets its own recommendation from the
+    /// real pipeline, approve all files each under its own label, and the service learns one
+    /// decision per email, including two that share a new label (research R5).
+    @Test func aBatchIsRecommendedAndLearnedEmailByEmail() async throws {
+        let client = try ServiceClient(baseURL: liveURL!)
+        let mail = FakeMail()
+        mail.accounts = [MailAccount(name: "Live", addresses: ["\(address)"])]
+        mail.mailboxes = ["INBOX", "[Gmail]/All Mail", "Family", "Family/Baby", "Finance", "Gadgets", "Travelling"]
+        let emails = [
+            Email(from: "Clinic <clinic@example.test>", subject: "Newborn check-up", body: "The baby sees the paediatrician."),
+            Email(from: "Bank <bank@example.test>", subject: "Your invoice", body: "The payment for your invoice is due."),
+            Email(from: "Shop <shop@example.test>", subject: "New laptop", body: "Your gadget ships today."),
+            Email(from: "Hotel <hotel@example.test>", subject: "Hotel booking", body: "Your hotel reservation is confirmed."),
+            Email(from: "Hostel <hostel@example.test>", subject: "Second booking", body: "Your booking for the hostel."),
+        ]
+        let refs = emails.enumerated().map { i, email in
+            MailMessageRef(
+                id: i + 1, mailbox: "INBOX", account: "Live", date: Double(10 - i), messageId: "live-\(i)",
+                from: email.from, subject: email.subject)
+        }
+        for (ref, email) in zip(refs, emails) { mail.emails[ref.messageId!] = email }
+        let batch = BatchSession(mail: mail, api: client, backend: FakeBackend())
+        await batch.start(
+            with: MailOpening(
+                selection: MailSelection(messages: refs, latest: nil), accounts: mail.accounts,
+                labels: AccountLabels(mailboxes: mail.mailboxes), viewed: ["INBOX"])
+        ).value
+        #expect(batch.rows.map { $0.recommended?.title } == [
+            "Family/Baby", "Finance", "Gadgets", "Travelling/Trip Lisbon", "Travelling/Trip Lisbon",
+        ])
+
+        await batch.approveAll()?.value
+        await batch.settle()
+        #expect(batch.rows.allSatisfy { $0.state == .done && $0.notice == nil })
+        #expect(mail.created == ["Travelling/Trip Lisbon"])
+        let setName = LabelSync.setName(address: address)
+        let setId = try #require(try await client.listSets().first { $0.name == setName }?.id)
+        let detail = try await client.getSet(id: setId)
+        let learned = Dictionary(uniqueKeysWithValues: detail.categories.map { ($0.path, $0.exampleCount) })
+        #expect(learned["Family/Baby"] == 1)
+        #expect(learned["Finance"] == 1)
+        #expect(learned["Gadgets"] == 1)
+        #expect(learned["Travelling/Trip Lisbon"] == 2)
+    }
+
     @Test func anEmailLikeThoseInTheTrashIsSuggestedForDeletion() async throws {
         let client = try ServiceClient(baseURL: liveURL!)
         let mail = FakeMail()

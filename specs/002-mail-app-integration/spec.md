@@ -23,7 +23,7 @@ The owner selects an email in Mail and triggers the recommender from Mail with o
 1. **Given** an email from the Gmail account is selected in Mail, **When** the owner triggers the recommender, **Then** a window appears at once with the email's subject and all labels, and a recommendation appears when ready.
 2. **Given** a recommendation is shown, **When** the owner accepts it, **Then** the email is filed under that label, the decision is recorded for learning, and the window closes.
 3. **Given** a recommendation is shown, **When** the owner picks a different label, **Then** the email is filed under the chosen label and the correction is recorded for learning.
-4. **Given** several emails or a whole conversation are selected, **When** the owner accepts a label, **Then** all selected emails get the label, and the recommendation is based on the most recent one.
+4. **Given** several emails or a whole conversation are selected, **When** the owner accepts a label, **Then** all selected emails get the label, and the recommendation is based on the most recent one. *(Replaced by [spec 004](../004-batch-recommendations/spec.md): each selected email now gets its own recommendation.)*
 5. **Given** the owner has chosen "keep in Inbox", **When** a label is applied, **Then** the email gets the label and stays in the Inbox, and this choice is remembered.
 
 ---

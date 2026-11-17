@@ -24,6 +24,7 @@ final class FakeMail: MailSource, @unchecked Sendable {
 
     func opening() async throws -> MailOpening {
         if let selectionError { throw selectionError }
+        if let openingResult { return openingResult }
         let owner = selectionResult.messages.first?.account
         let isGmail = accounts.contains { $0.name == owner }
         return MailOpening(
@@ -35,6 +36,9 @@ final class FakeMail: MailSource, @unchecked Sendable {
     }
     func file(_ items: [FileItem], into target: String, account: String) async throws {
         if let fileError { throw fileError }
+        if fileFailsFor.contains(target) || (failUnlessExists && !mailboxes.contains(target)) {
+            throw MailError.notFound("that label is not in the account")
+        }
         filed.append((items, target))
     }
     var archiveResult = ArchiveResult.archived
@@ -80,6 +84,52 @@ final class FakeMail: MailSource, @unchecked Sendable {
         holdingCalls.append((emails, mailboxes))
         if let holdingError { throw holdingError }
         return mailboxes.map { box in emails.filter { (held[box] ?? []).contains($0.subject) }.count }
+    }
+
+    // Batches. Every Message-ID Mail is asked to change is recorded in `touched` (SC-005).
+    var openingResult: MailOpening?
+    var emails: [String: Email] = [:]
+    var gone: Set<String> = []
+    var readCalls: [[String]] = []
+    var archiveOutcome: ArchiveOutcome?
+    var trashOutcome: TrashOutcome?
+    var batchArchived: [[String]] = []
+    var batchTrashed: [[String]] = []
+    var trashLookups2 = TrashLookups()
+    var trashLookupCalls: [(senders: [String], messageIds: [String])] = []
+    var fileFailsFor: Set<String> = []
+    var failUnlessExists = false
+    var touched: Set<String> {
+        var out = Set(batchArchived.flatMap { $0 } + batchTrashed.flatMap { $0 })
+        for (items, _) in filed { for item in items { out.insert(idsByLocation[item.id] ?? "") } }
+        return out
+    }
+    var idsByLocation: [Int: String] = [:]
+
+    func read(_ refs: [MailMessageRef], viewed: [String], account: String) async throws -> [ReadEmail] {
+        readCalls.append(refs.compactMap(\.messageId))
+        return refs.map { ref in
+            guard let id = ref.messageId, !gone.contains(id) else {
+                return ReadEmail(messageId: ref.messageId, found: false)
+            }
+            idsByLocation[ref.id + 1000] = id
+            return ReadEmail(
+                messageId: id, placement: Placement(id: ref.id + 1000, mailbox: "INBOX", inInbox: true),
+                email: emails[id] ?? Email(from: ref.from ?? "", subject: ref.subject ?? "", body: "Body of \(id)"))
+        }
+    }
+    func archive(_ emails: [SelectedEmail], viewed: [String], account: String) async throws -> ArchiveOutcome {
+        batchArchived.append(emails.map(\.messageId))
+        return archiveOutcome ?? ArchiveOutcome(result: archiveResult)
+    }
+    func moveToTrash(_ emails: [SelectedEmail], viewed: [String], account: String) async throws -> TrashOutcome {
+        batchTrashed.append(emails.map(\.messageId))
+        return trashOutcome ?? TrashOutcome(result: trashResult)
+    }
+    func trashSimilar(senders: [String], messageIds: [String], account: String) async throws -> TrashLookups {
+        trashLookupCalls.append((senders, messageIds))
+        if let trashLookupError { throw trashLookupError }
+        return trashLookups2
     }
 }
 
@@ -173,8 +223,17 @@ final class FakeAPI: RecommenderAPI, @unchecked Sendable {
             throw ServiceError.api(status: 503, code: "llm_unavailable", message: "later")
         }
         if let suggestError { throw suggestError }
+        if let own = bySubject[email.subject] {
+            freshCount[email.subject, default: 0] += 1
+            let n = freshCount[email.subject]!
+            return n == 1 ? own : Suggestion(suggestionId: "\(own.suggestionId)-fresh\(n - 1)", category: own.category)
+        }
         return suggestion
     }
+    /// Batches: each email's own suggestion, by subject. A second request for the same email is a
+    /// fresh suggestion with its own id.
+    var bySubject: [String: Suggestion] = [:]
+    var freshCount: [String: Int] = [:]
     func feedback(suggestionId: String, email: Email, decision: FeedbackDecision) async throws {
         if let feedbackError { throw feedbackError }
         if acceptNewFailsWith400, case .acceptNew = decision {

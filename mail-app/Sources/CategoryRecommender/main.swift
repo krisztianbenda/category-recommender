@@ -3,9 +3,13 @@
 //   --self-test-local --out FILE   real Mail, temporary local mailboxes, pass or fail only
 //   --self-test-account --out FILE owner-run check on the selected email, in any account, pass or
 //                                  fail only (--self-test-gmail is the old name)
-//   --demo [--newsletter] [--snapshot FILE]
+//   --self-test-selection --out FILE
+//                                  owner-run check that Mail lets the app select some of the
+//                                  selected emails; changes no email, pass or fail only
+//   --demo [--newsletter | --batch] [--snapshot FILE | --drive FILE]
 //                                  synthetic Mail, nothing real is touched; --newsletter shows
-//                                  an email like three in the synthetic Trash
+//                                  an email like three in the synthetic Trash, --batch six
+//                                  synthetic emails selected at once
 import AppKit
 import Foundation
 import MailCore
@@ -32,7 +36,8 @@ let check: (String, TimeInterval)? =
         : arguments.contains("--self-test-recover")
             ? ("selftestRecover", 300)
             : arguments.contains("--self-test-account") || arguments.contains("--self-test-gmail")
-                ? ("selftestAccount", 400) : nil
+                ? ("selftestAccount", 400)
+                : arguments.contains("--self-test-selection") ? ("selftestSelection", 120) : nil
 
 if let (command, timeout) = check {
     Task {
@@ -79,7 +84,9 @@ application.setActivationPolicy(.accessory)
 MainActor.assumeIsolated {
     if arguments.contains("--demo") {
         let demoSettings = AppSettings(defaults: UserDefaults(suiteName: "com.catrec.mail.demo")!)
-        let demo = arguments.contains("--newsletter") ? DemoMail.newsletter() : DemoMail()
+        let demo =
+            arguments.contains("--batch")
+            ? DemoMail.batch() : arguments.contains("--newsletter") ? DemoMail.newsletter() : DemoMail()
         let environment = AppEnvironment(mail: demo, client: client, backend: backend, log: log)
         let delegate = AppDelegate(settings: demoSettings, environment: environment)
         application.delegate = delegate
@@ -102,6 +109,20 @@ func runDemo(_ delegate: AppDelegate) {
         let snapshotPath = value(after: "--snapshot")
         let drivePath = value(after: "--drive")
         guard snapshotPath != nil || drivePath != nil else { return }
+        for _ in 0..<100 where controller.currentSession == nil && controller.currentBatch == nil {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        if let batch = controller.currentBatch {
+            await batch.recommendationsFinished()
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            if let drivePath {
+                let report = await driveBatch(batch: batch, controller: controller, mail: delegate.demoMail)
+                try? report.write(toFile: drivePath, atomically: true, encoding: .utf8)
+                exit(0)
+            }
+            try? controller.snapshot(to: URL(fileURLWithPath: snapshotPath!))
+            exit(0)
+        }
         guard let session = controller.currentSession else { exit(1) }
         waiting: for _ in 0..<600 {
             try? await Task.sleep(nanoseconds: 100_000_000)
@@ -132,15 +153,7 @@ func runDemo(_ delegate: AppDelegate) {
 @MainActor
 func driveKeyboard(session: RecommenderSession, controller: PanelController, mail: DemoMail?) async -> String {
     func press(_ keyCode: UInt16, _ characters: String, _ modifiers: NSEvent.ModifierFlags = []) async {
-        guard
-            let event = NSEvent.keyEvent(
-                with: .keyDown, location: .zero, modifierFlags: modifiers,
-                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: controller.windowNumber,
-                context: nil, characters: characters, charactersIgnoringModifiers: characters,
-                isARepeat: false, keyCode: keyCode)
-        else { return }
-        NSApp.postEvent(event, atStart: false)
-        try? await Task.sleep(nanoseconds: 150_000_000)
+        await pressKey(keyCode, characters, modifiers, in: controller, settle: 150_000_000)
     }
     func waitUntilClosed() async {
         for _ in 0..<40 where controller.isOpen { try? await Task.sleep(nanoseconds: 100_000_000) }
@@ -184,4 +197,91 @@ func driveKeyboard(session: RecommenderSession, controller: PanelController, mai
     report["windowClosedAfterFiling"] = String(!controller.isOpen)
 
     return json()
+}
+
+/// Presses the batch window's keys through the real event path, against the synthetic Mail, and
+/// reports what happened (specs/004-batch-recommendations/contracts/batch-window.md).
+@MainActor
+func driveBatch(batch: BatchSession, controller: PanelController, mail: DemoMail?) async -> String {
+    func press(_ keyCode: UInt16, _ characters: String, _ modifiers: NSEvent.ModifierFlags = []) async {
+        await pressKey(keyCode, characters, modifiers, in: controller, settle: 200_000_000)
+    }
+    func touched() -> Set<String> {
+        guard let mail else { return [] }
+        let filed = mail.filed.flatMap { $0.items.map(\.id) }
+        let ids = batch.rows.filter { row in filed.contains(row.placement?.id ?? -1) }.compactMap(\.ref.messageId)
+        return Set(ids + mail.movedToTrash.flatMap { $0 })
+    }
+    var report: [String: Bool] = [:]
+    let ids = batch.rows.map(\.id)
+    let messageIds = batch.rows.compactMap(\.ref.messageId)
+    report["sixRows"] = ids.count == 6
+    report["startsOnFirstRow"] = batch.highlightedID == ids.first
+
+    await press(125, "\u{F701}")  // Down
+    report["downMoves"] = batch.highlightedID == ids[1]
+    await press(126, "\u{F700}")  // Up
+    report["upReturns"] = batch.highlightedID == ids[0]
+
+    // Return accepts only the highlighted row.
+    await press(36, "\r")
+    for _ in 0..<40 where batch.rows[0].state != .done { try? await Task.sleep(nanoseconds: 50_000_000) }
+    report["returnAppliesOnlyTheHighlightedRow"] = touched() == [messageIds[0]]
+
+    // Typing opens Choose a label with the search.
+    await press(125, "\u{F701}")
+    await press(5, "g")
+    report["typingOpensChooseALabel"] = batch.pickerScope == [ids[1]] && batch.pickerQuery == "g"
+    await press(53, "\u{1B}")  // Escape
+    report["escapeReturnsToTheList"] = batch.pickerScope == nil && touched().count == 1
+
+    // Space marks; Command-Delete on two marked rows asks first.
+    await press(49, " ")
+    await press(125, "\u{F701}")
+    await press(49, " ")
+    report["spaceMarks"] = batch.rows[1].marked && batch.rows[2].marked
+    await press(51, "\u{7F}", .command)
+    report["trashingMarkedRowsAsksFirst"] = batch.confirmation?.trashCount == 2 && touched().count == 1
+    await press(53, "\u{1B}")
+    report["escapeCancelsTheConfirmation"] = batch.confirmation == nil && touched().count == 1
+
+    // Return on marked rows applies only them.
+    await press(36, "\r")
+    for _ in 0..<40 where batch.rows[2].state != .done { try? await Task.sleep(nanoseconds: 50_000_000) }
+    report["returnAppliesOnlyTheMarkedRows"] = touched() == Set(messageIds[0..<3])
+
+    // Delete skips; Command-Return approves the ready rows that are not skipped.
+    await press(125, "\u{F701}")
+    await press(51, "\u{7F}")
+    report["deleteSkips"] = batch.rows[3].skipped
+    await press(36, "\r", .command)
+    if batch.confirmation != nil { await press(36, "\r") }
+    for _ in 0..<60 where batch.rows[4].state != .done { try? await Task.sleep(nanoseconds: 50_000_000) }
+    report["approveAllLeavesSkippedAndUnrecommendedRows"] =
+        !touched().contains(messageIds[3]) && !touched().contains(messageIds[5]) && touched().contains(messageIds[4])
+
+    await press(53, "\u{1B}")
+    for _ in 0..<20 where controller.isOpen { try? await Task.sleep(nanoseconds: 50_000_000) }
+    report["escapeCloses"] = !controller.isOpen
+    report["undecidedLeftAlone"] = !touched().contains(messageIds[3]) && !touched().contains(messageIds[5])
+
+    let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])
+    return data.map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+}
+
+/// Posts one key press to the window through the real event path, then lets it settle.
+@MainActor
+func pressKey(
+    _ keyCode: UInt16, _ characters: String, _ modifiers: NSEvent.ModifierFlags, in controller: PanelController,
+    settle nanoseconds: UInt64
+) async {
+    guard
+        let event = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: modifiers,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: controller.windowNumber,
+            context: nil, characters: characters, charactersIgnoringModifiers: characters,
+            isARepeat: false, keyCode: keyCode)
+    else { return }
+    NSApp.postEvent(event, atStart: false)
+    try? await Task.sleep(nanoseconds: nanoseconds)
 }

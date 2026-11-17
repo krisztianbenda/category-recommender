@@ -14,6 +14,10 @@ ObjC.import('Foundation');
 const Mail = Application('Mail');
 
 const MAX_MESSAGES = 200;
+// A batch: one recommendation per email (specs/004-batch-recommendations). The 50 newest of at most
+// the first 1,000 selected, in Mail's order.
+const MAX_BATCH = 50;
+const MAX_BATCH_SCAN = 1000;
 const MAX_DEPTH = 8;
 const GMAIL_HOST = /(^|\.)(gmail|googlemail)\.com$/i;
 const GMAIL_ADDRESS = /@(gmail|googlemail)\.com$/i;
@@ -28,7 +32,15 @@ function fail(number, message) {
 
 // These commands' output may be shared while debugging, and Mail's own error texts can quote
 // mailbox names, so they report error numbers and this script's fixed messages only.
-const CHECKS = ['diagnose', 'selftestLocal', 'selftestGmail', 'selftestAccount', 'selftestRecover', 'selftestLocate'];
+const CHECKS = [
+  'diagnose',
+  'selftestLocal',
+  'selftestGmail',
+  'selftestAccount',
+  'selftestRecover',
+  'selftestLocate',
+  'selftestSelection',
+];
 
 const NOT_FOUND = -1728; // Apple Events "can't get"
 
@@ -275,14 +287,18 @@ function appleScriptText(text) {
   return '"' + text.replace(/[\u0000-\u001f]/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 }
 
+function mailboxReference(accountName, path) {
+  let reference = 'account ' + appleScriptText(accountName);
+  for (const segment of path.split('/')) {
+    reference = 'mailbox ' + appleScriptText(segment) + ' of ' + reference;
+  }
+  return reference;
+}
+
 function showMailbox(account, path) {
   const owner = 'account ' + appleScriptText(account.name());
-  let nested = owner;
-  for (const segment of path.split('/')) {
-    nested = 'mailbox ' + appleScriptText(segment) + ' of ' + nested;
-  }
   // Accounts that name a nested mailbox by its whole path take that path as one name.
-  const references = [nested, 'mailbox ' + appleScriptText(path) + ' of ' + owner];
+  const references = [mailboxReference(account.name(), path), 'mailbox ' + appleScriptText(path) + ' of ' + owner];
   const shown = () => {
     const selected = attempt(() => Mail.messageViewers[0].selectedMailboxes(), []) || [];
     return selected.length === 1 && pathOf(selected[0]) === path;
@@ -512,6 +528,200 @@ function sameSet(a, b) {
   return a.length === b.length && a.every((x) => b.indexOf(x) >= 0);
 }
 
+/**
+ * Clicks a command of Mail's menus that acts on Mail's selection, only when that selection is
+ * exactly `ids`; with `input.select` (a batch), it selects them first. Returns why it did not
+ * click, or null once clicked.
+ */
+/** Adds Mail's error numbers from selecting, when there were any. */
+function withSelectErrors(input, result) {
+  return input.selectErrors && input.selectErrors.length ? Object.assign(result, { selectErrors: input.selectErrors }) : result;
+}
+
+function clickOnExactly(input, ids) {
+  if (input.select) {
+    const { selected, errors } = selectForAction(input);
+    input.selectErrors = errors.filter((n) => n !== 1).filter((n, i, all) => all.indexOf(n) === i);
+    if (!selected) return 'selectionChanged';
+  }
+  if (!sameSet(selectedMessageIds(), ids)) return 'selectionChanged';
+  Mail.activate();
+  delay(0.2);
+  return clickMenuCommand(input.titles || []);
+}
+
+// Selecting emails. Mail's Archive and Delete act on Mail's selection, and a batch acts on some of
+// the selected emails, so the bridge selects exactly an action's emails first. JXA cannot set a
+// viewer's selection, so that one step is AppleScript, built from escaped names and integer ids.
+// Reading the selection back is the gate: a command never runs unless Mail selected exactly these.
+
+/**
+ * Runs AppleScript in this process. Returns 0, or Mail's error number. Only the number: Mail's error
+ * text can quote mailbox names.
+ */
+function runAppleScript(source) {
+  return runAppleScriptValue(source).error;
+}
+
+/**
+ * Runs AppleScript in this process. Returns { error, value }: error is 0 or Mail's error number,
+ * value the script's result as an integer, when it is one. Nil from NSAppleScript is a failure,
+ * even when its error details cannot be read.
+ */
+function runAppleScriptValue(source) {
+  const error = Ref();
+  const result = $.NSAppleScript.alloc.initWithSource($(source)).executeAndReturnError(error);
+  const isNil = (x) => !x || (typeof x.isNil === 'function' && x.isNil());
+  if (!isNil(result)) {
+    return { error: 0, value: attempt(() => Number(result.int32Value), null) };
+  }
+  const number = attempt(() => {
+    const value = error[0].objectForKey('NSAppleScriptErrorNumber');
+    return isNil(value) ? -1 : Number(value.intValue);
+  }, -1);
+  return { error: number || -1, value: null };
+}
+
+// Ways of naming one email to Mail, tried in order. Not `message id N`: in Mail's dictionary
+// `message id` is the Message-ID property, so that form does not compile.
+const MESSAGE_FORMS = {
+  // By its mailbox, segment by segment, and its numeric id.
+  nested: (account, ref) =>
+    '(first message of (' + mailboxReference(account, ref.mailbox) + ') whose id is ' + Math.floor(Number(ref.id)) + ')',
+  // By the mailbox's whole path as one name, as some accounts name nested mailboxes.
+  wholePath: (account, ref) =>
+    '(first message of (mailbox ' + appleScriptText(ref.mailbox) + ' of account ' + appleScriptText(account) +
+    ') whose id is ' + Math.floor(Number(ref.id)) + ')',
+  // By its Message-ID within the mailbox.
+  messageId: (account, ref) =>
+    '(first message of (' + mailboxReference(account, ref.mailbox) + ') whose message id is ' +
+    appleScriptText(String(ref.messageId || '')) + ')',
+};
+
+/**
+ * Asks Mail to select exactly these emails, named one way. Returns 0 once the selection read back
+ * is exactly `messageIds`, else Mail's error number, or 1 when Mail answered but selected something
+ * else.
+ */
+function selectExactly(accountName, refs, messageIds, form) {
+  if (!refs.length || refs.length !== messageIds.length) return 1;
+  const name = MESSAGE_FORMS[form || 'nested'];
+  const source = [
+    'tell application "Mail"',
+    'if (count of message viewers) is 0 then make new message viewer',
+    'set selected messages of message viewer 1 to {' + refs.map((r) => name(accountName, r)).join(', ') + '}',
+    'end tell',
+  ].join('\n');
+  const error = runAppleScript(source);
+  if (error) return error;
+  return until(() => sameSet(selectedMessageIds(), messageIds), 2) ? 0 : 1;
+}
+
+/** Forms selectForAction tries, in order. */
+const SELECT_FORMS = Object.keys(MESSAGE_FORMS);
+
+/**
+ * Selects `input.select` in Mail: the messages Mail was showing, then the copies filing uses, each
+ * named every way Mail may take, then again after showing the mailbox the owner was viewing.
+ * Returns { selected, errors }: errors are the numbers of the attempts that failed, for the window.
+ */
+function selectForAction(input) {
+  const emails = input.select || [];
+  const ids = input.messageIds || [];
+  const errors = [];
+  const refs = (key) =>
+    emails.map((e) => e[key] && Object.assign({ messageId: e.messageId }, e[key])).filter((r) => r && r.mailbox);
+  const tryAll = () => {
+    for (const key of ['view', 'placement']) {
+      for (const form of SELECT_FORMS) {
+        const result = selectExactly(input.account, refs(key), ids, form);
+        if (result === 0) return true;
+        errors.push(result);
+      }
+    }
+    return false;
+  };
+  if (tryAll()) return { selected: true, errors };
+  const viewed = (input.viewed || [])[0];
+  const selected = Boolean(viewed && showMailbox(accountNamed(input.account), viewed) && tryAll());
+  return { selected, errors };
+}
+
+/** A batch's email as `opening` lists it: what Mail shows, with no text and no search for copies. */
+function lightRef(message, date) {
+  const mailbox = message.mailbox();
+  return {
+    id: message.id(),
+    mailbox: pathOf(mailbox),
+    account: attempt(() => mailbox.account().name(), '') || '',
+    date,
+    messageId: attempt(() => message.messageId(), '') || '',
+    from: attempt(() => message.sender(), '') || '',
+    subject: attempt(() => message.subject(), '') || '',
+  };
+}
+
+function batchOpening(selected) {
+  const scanned = selected.slice(0, MAX_BATCH_SCAN);
+  const dates = scanned.map((m) => attempt(() => m.dateReceived().getTime(), 0));
+  const order = scanned
+    .map((_, i) => i)
+    .sort((a, b) => dates[b] - dates[a])
+    .slice(0, MAX_BATCH);
+  const messages = order.map((i) => lightRef(scanned[i], dates[i]));
+  const accounts = mailAccounts();
+  const owner = messages.length ? accounts.find((a) => a.name === messages[0].account) : null;
+  return {
+    selection: { running: true, total: selected.length, messages, latest: null },
+    accounts,
+    labels: owner ? labelsOf(owner.name) : null,
+    viewed: owner ? viewedPaths(owner.name) : [],
+  };
+}
+
+/** Finds the copy filing acts on, as `opening` does for one email, and reads the text. */
+function readRef(account, input, viewedByAccount, inboxes) {
+  const box = attempt(() => resolve(account, input.mailbox), null);
+  const message = box
+    ? attempt(() => {
+        const m = box.messages.byId(input.id);
+        m.id();
+        return m;
+      }, null)
+    : null;
+  if (!message) return { messageId: input.messageId, found: false };
+  const messageId = input.messageId || attempt(() => message.messageId(), '') || '';
+  const ref = { id: input.id, mailbox: input.mailbox, account: account.name(), messageId };
+  const where = placed(ref, messageId, viewedByAccount);
+  return {
+    messageId,
+    found: true,
+    placement: { id: where.id, mailbox: where.mailbox, inInbox: isInInbox(where, inboxes) },
+    email: readEmail(message),
+  };
+}
+
+/** Emails from this sender address in the Trash, newest first, leaving out `excluded`. */
+function trashMatches(trash, address, excluded, limit) {
+  if (address.indexOf('@') < 0) return [];
+  const hits = trash.messages.whose({ sender: { _contains: address } });
+  const senders = attempt(() => hits.sender(), []) || [];
+  const subjects = attempt(() => hits.subject(), []) || [];
+  const ids = attempt(() => hits.messageId(), []) || [];
+  const dates = attempt(() => hits.dateReceived(), []) || [];
+  return senders
+    .map((from, i) => ({
+      from: String(from || ''),
+      subject: String(subjects[i] || ''),
+      messageId: ids[i],
+      date: dates[i] ? new Date(dates[i]).getTime() : 0,
+    }))
+    .filter((m) => senderAddress(m.from) === address && excluded.indexOf(m.messageId) < 0)
+    .sort((a, b) => b.date - a.date)
+    .slice(0, limit)
+    .map((m) => ({ from: m.from, subject: m.subject }));
+}
+
 // Commands
 
 const commands = {
@@ -521,6 +731,7 @@ const commands = {
       return { selection: { running: false, total: 0, messages: [], latest: null }, accounts: [], labels: null };
     }
     const selected = currentSelection();
+    if (selected.length > 1) return batchOpening(selected);
     const considered = selected.slice(0, MAX_MESSAGES);
     const viewed = new Map();
     const inboxes = new Map();
@@ -548,6 +759,14 @@ const commands = {
     return labelsOf(input.account);
   },
 
+  // Places and reads some emails of a batch. Reading never changes a message.
+  read(input) {
+    const account = accountNamed(input.account);
+    const viewedByAccount = new Map([[input.account, input.viewed || []]]);
+    const inboxes = new Map();
+    return { items: (input.refs || []).map((ref) => readRef(account, ref, viewedByAccount, inboxes)) };
+  },
+
   file(input) {
     const kind = kindOf(input.account);
     const account = Mail.accounts.byName(input.account);
@@ -572,69 +791,63 @@ const commands = {
 
   // Takes the filed emails out of the Inbox with Mail's own Archive command, which in Gmail removes
   // the Inbox label. It acts on what is selected in Mail, so it only runs if that is exactly the
-  // filed emails.
+  // filed emails. With `select` (a batch), it first selects exactly them.
   archive(input) {
     const account = accountNamed(input.account);
-    if (!sameSet(selectedMessageIds(), input.messageIds)) return { result: 'selectionChanged' };
-    Mail.activate();
-    delay(0.2);
-    const problem = clickMenuCommand(input.titles || []);
-    if (problem) return { result: problem };
+    const ids = input.messageIds || [];
+    if (!ids.length) return { result: 'selectionChanged' };
+    const problem = clickOnExactly(input, ids);
+    if (problem) return withSelectErrors(input, { result: problem });
     const inbox = resolve(account, 'INBOX');
     const left = () =>
-      input.messageIds.filter(
-        (messageId) => (attempt(() => inbox.messages.whose({ messageId })().length, 0) || 0) > 0,
-      ).length;
-    return { result: until(() => left() === 0, 10) ? 'archived' : 'stillThere' };
+      ids.filter((messageId) => (attempt(() => inbox.messages.whose({ messageId })().length, 0) || 0) > 0);
+    if (until(() => left().length === 0, 10 + ids.length)) return { result: 'archived' };
+    return { result: 'stillThere', left: left() };
   },
 
   // Emails from the same sender in the account's Trash, newest first: sender and subject only.
   // They tell the recommender that the owner deletes emails like this one. Also says whether the
-  // selected emails are in the Trash already. Reading never changes a message.
+  // selected emails are in the Trash already. Reading never changes a message. With `senders` (a
+  // batch), it answers for each sender address, and says which of the emails are in the Trash.
   trashSimilar(input) {
     const account = accountNamed(input.account);
+    const batch = Array.isArray(input.senders);
     const trash = trashOf(account);
-    if (!trash) return { found: false, inTrash: false, messages: [] };
     const selected = input.messageIds || [];
-    const inTrash = selected.some((messageId) => holds(trash, messageId));
-    const address = senderAddress(input.sender || '');
-    if (address.indexOf('@') < 0) return { found: true, inTrash, messages: [] };
-    const hits = trash.messages.whose({ sender: { _contains: address } });
-    const senders = attempt(() => hits.sender(), []) || [];
-    const subjects = attempt(() => hits.subject(), []) || [];
-    const ids = attempt(() => hits.messageId(), []) || [];
-    const dates = attempt(() => hits.dateReceived(), []) || [];
     const limit = Math.min(Math.max(Number(input.limit) || 20, 1), MAX_TRASH_MATCHES);
-    const messages = senders
-      .map((from, i) => ({
-        from: String(from || ''),
-        subject: String(subjects[i] || ''),
-        messageId: ids[i],
-        date: dates[i] ? new Date(dates[i]).getTime() : 0,
-      }))
-      .filter((m) => senderAddress(m.from) === address && selected.indexOf(m.messageId) < 0)
-      .sort((a, b) => b.date - a.date)
-      .slice(0, limit)
-      .map((m) => ({ from: m.from, subject: m.subject }));
-    return { found: true, inTrash, messages };
+    if (!batch) {
+      if (!trash) return { found: false, inTrash: false, messages: [] };
+      const inTrash = selected.some((messageId) => holds(trash, messageId));
+      return { found: true, inTrash, messages: trashMatches(trash, senderAddress(input.sender || ''), selected, limit) };
+    }
+    if (!trash) return { found: false, inTrash: false, inTrashIds: [], bySender: {}, messages: [] };
+    const inTrashIds = selected.filter((messageId) => holds(trash, messageId));
+    const bySender = {};
+    for (const sender of input.senders) {
+      const address = senderAddress(sender || '');
+      if (!Object.prototype.hasOwnProperty.call(bySender, address)) {
+        bySender[address] = trashMatches(trash, address, selected, limit);
+      }
+    }
+    return { found: true, inTrash: inTrashIds.length > 0, inTrashIds, bySender, messages: [] };
   },
 
   // Moves the selected emails to the Trash with Mail's own Delete command, as the owner would. It
-  // acts on what is selected in Mail, so it only runs if that is exactly these emails. In the Trash
-  // itself, Mail's Delete erases for good, so emails that are there already are refused.
+  // acts on what is selected in Mail, so it only runs if that is exactly these emails. With `select`
+  // (a batch), it first selects exactly them. In the Trash itself, Mail's Delete erases for good, so
+  // emails that are there already are refused, before anything is selected.
   trash(input) {
     const account = accountNamed(input.account);
     const ids = input.messageIds || [];
-    if (!ids.length || !sameSet(selectedMessageIds(), ids)) return { result: 'selectionChanged' };
+    if (!ids.length) return { result: 'selectionChanged' };
     const trash = trashOf(account);
     if (!trash) return { result: 'noTrash' };
     if (ids.some((messageId) => holds(trash, messageId))) return { result: 'alreadyInTrash' };
-    Mail.activate();
-    delay(0.2);
-    const problem = clickMenuCommand(input.titles || []);
-    if (problem) return { result: problem };
-    const arrived = until(() => ids.every((messageId) => holds(trash, messageId)), 15);
-    return { result: arrived ? 'trashed' : 'notInTrash' };
+    const problem = clickOnExactly(input, ids);
+    if (problem) return withSelectErrors(input, { result: problem });
+    const missing = () => ids.filter((messageId) => !holds(trash, messageId));
+    if (until(() => missing().length === 0, 15 + ids.length)) return { result: 'trashed' };
+    return { result: 'notInTrash', left: missing() };
   },
 
   // For each mailbox, how many of these emails it holds. It tells a renamed label from a new one,
@@ -774,6 +987,32 @@ const commands = {
         return heldCount(named(parent), emails) === 1;
       });
     }
+    // A batch selects some emails in Mail before Archive or Delete (specs/004-batch-recommendations).
+    step('selectSubset', () => {
+      let box = message ? message.mailbox() : null;
+      if (!box) return false;
+      if (holding(box).length < 3 && input.mbox) {
+        Mail.importMailMailbox({ at: Path(input.mbox) });
+        until(() => (findMessage() !== null && holding(findMessage().mailbox()).length >= 3), 30);
+        box = findMessage().mailbox();
+      }
+      const all = holding(box);
+      if (all.length < 3) return false;
+      const name = box.name();
+      const show = 'tell application "Mail" to set selected mailboxes of message viewer 1 to {mailbox ' +
+        appleScriptText(name) + '}';
+      $.NSAppleScript.alloc.initWithSource($(show)).executeAndReturnError(Ref());
+      delay(1);
+      const two = all.slice(0, 2);
+      const wanted = two.map((m) => m.messageId());
+      const select = 'tell application "Mail" to set selected messages of message viewer 1 to {' +
+        two
+          .map((m) => '(first message of mailbox ' + appleScriptText(name) + ' whose id is ' + Math.floor(Number(m.id())) + ')')
+          .join(', ') +
+        '}';
+      $.NSAppleScript.alloc.initWithSource($(select)).executeAndReturnError(Ref());
+      return until(() => sameSet(selectedMessageIds(), wanted), 3);
+    });
     step('showMailboxInMail', () => {
       const viewers = Mail.messageViewers.length;
       if (!viewers) return false;
@@ -843,6 +1082,54 @@ const commands = {
 };
 
 commands.selftestAccount = commands.selftestGmail;
+
+// Real account, run only by the owner, with three or more emails selected in the Inbox. Checks that
+// Mail lets the app select some of them, as a batch does before Archive or Delete, then restores
+// the selection. It changes no email, and reports booleans and pass or fail only.
+commands.selftestSelection = function selftestSelection() {
+  const selected = currentSelection();
+  if (selected.length < 3) throw fail(NOT_FOUND, 'select three or more emails in the Inbox first');
+  const first = messageRef(selected[0], new Map(), new Map());
+  const account = first.account;
+  if (!account) throw fail(NOT_FOUND, 'select emails in an account, not under On My Mac');
+  const ids = selected.map((m) => attempt(() => m.messageId(), '') || '');
+  const original = selected.map((m) => ({ id: m.id(), mailbox: pathOf(m.mailbox()) }));
+  const viewedByAccount = new Map();
+  const two = selected.slice(0, 2);
+  const wanted = ids.slice(0, 2);
+  const view = two.map((m) => ({ id: m.id(), mailbox: pathOf(m.mailbox()) }));
+  const placement = two.map((m) => {
+    const ref = messageRef(m, viewedByAccount, new Map());
+    return { id: ref.id, mailbox: ref.mailbox };
+  });
+  const steps = {};
+  // Whether a failing AppleScript is noticed at all.
+  steps.errorsSeen = runAppleScript('error "check" number 4242') !== 0 ? 'pass' : 'fail';
+  const viewers = runAppleScriptValue('tell application "Mail" to count message viewers');
+  steps.viewers = viewers.error ? 'error ' + viewers.error : viewers.value;
+  // Whether AppleScript sees the same selection as the app.
+  const seen = runAppleScriptValue('tell application "Mail" to count (selected messages of message viewer 1)');
+  steps.sameViewer = seen.error ? 'error ' + seen.error : seen.value === selected.length ? 'pass' : 'fail';
+  // Narrowing the selection to emails Mail itself hands over, with no naming at all.
+  const narrowed = runAppleScript(
+    'tell application "Mail" to set selected messages of message viewer 1 to items 1 thru 2 of (get selected messages of message viewer 1)',
+  );
+  steps.narrowItself = narrowed
+    ? 'error ' + narrowed
+    : until(() => selectedMessageIds().length === 2, 2) ? 'pass' : 'fail';
+  for (const form of SELECT_FORMS) {
+    const pick = (refs) => selectExactly(account, refs.map((r, i) => Object.assign({ messageId: wanted[i] }, r)), wanted, form);
+    const label = form.charAt(0).toUpperCase() + form.slice(1);
+    const v = pick(view);
+    steps['selectView' + label] = v === 0 ? 'pass' : v === 1 ? 'fail' : 'error ' + v;
+    const p = pick(placement);
+    steps['selectPlacement' + label] = p === 0 ? 'pass' : p === 1 ? 'fail' : 'error ' + p;
+  }
+  const back = original.map((o, i) => Object.assign({ messageId: ids[i] }, o));
+  const restored = SELECT_FORMS.some((form) => selectExactly(account, back, ids, form) === 0);
+  steps.restored = restored ? 'pass' : 'fail';
+  return { steps };
+};
 
 // The same check for an account with folders. The owner's email never moves: a copy of it goes to
 // a temporary folder, and that copy is what gets moved, into a folder under it. A move once took an
