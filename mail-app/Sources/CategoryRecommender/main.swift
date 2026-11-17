@@ -232,6 +232,17 @@ func driveBatch(batch: BatchSession, controller: PanelController, mail: DemoMail
     await press(125, "\u{F701}")
     await press(5, "g")
     report["typingOpensChooseALabel"] = batch.pickerScope == [ids[1]] && batch.pickerQuery == "g"
+
+    // Command-N opens New label with the search as its name; Up and Down choose where it goes.
+    await press(45, "n", .command)
+    report["commandNOpensNewLabel"] = batch.newLabel == NewLabelForm(name: "g")
+    await press(125, "\u{F701}")
+    report["downPutsTheNewLabelInsideOne"] = batch.newLabel?.parent == batch.newLabelParents.first?.mailbox
+    await press(126, "\u{F700}")
+    report["upPutsTheNewLabelAtTheTop"] = batch.newLabel != nil && batch.newLabel?.parent == nil
+    await press(53, "\u{1B}")
+    report["escapeLeavesNewLabelForTheSearch"] =
+        batch.newLabel == nil && batch.pickerScope == [ids[1]] && batch.pickerQuery == "g"
     await press(53, "\u{1B}")  // Escape
     report["escapeReturnsToTheList"] = batch.pickerScope == nil && touched().count == 1
 

@@ -57,10 +57,26 @@ The single window's label list and search, for the scope. Above the list: "For: 
 | Type | Search the labels, or name a new one. |
 | Up, Down | Move the highlight. |
 | Return | File the scope under the highlighted label, or create it. Back to the list. |
+| Command-N | New label, with the search as its name. |
 | Command-Delete | Move the scope to the Trash. Edits the text while there is any, as in the single window. |
 | Escape, Left with an empty search | Back to the list, without changing anything. |
 
 Deleting a label is not offered here (spec, Assumptions).
+
+### New label
+
+Opened with **New label…** next to the search, or Command-N. It takes the place of the search and the list, like Mail's own New Mailbox (FR-011):
+
+- **Name**: starts as the search. "Trips/Lis" starts as "Lis" inside Trips when Trips is a label.
+- **Location**: **Top level**, or any label, to make a sub-label of it. A label deeper than two levels sits in the recommender as `Work/Clients › Acme`, as when it is made in Mail.
+- Below them, what Return will do: "Creates “Trips/Lisbon” and files the 3 emails under it." If a label of that name is there already, with case and accents folded as the service does, it files under that one instead of making a second. One of the account's own mailboxes, such as Inbox, is refused.
+
+| Key | Action |
+|-----|--------|
+| Type | Edit the name. |
+| Up, Down | Move the location: Top level first, then the labels in the list's order. |
+| Return | Create the label and file the scope under it (FR-019: once for all of them). Back to the list. |
+| Escape | Back to the search and the list, as they were. |
 
 ## Confirmation
 

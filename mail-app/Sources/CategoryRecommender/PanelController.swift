@@ -176,7 +176,31 @@ final class PanelController {
             return nil
         }
 
+        if batch.pickerScope != nil, batch.newLabel != nil {
+            guard modifiers.isEmpty else { return event }  // Command-Delete and the like edit the name
+            switch event.keyCode {
+            case 53:  // Escape
+                batch.cancelNewLabel()
+                return nil
+            case 125:  // Down
+                batch.moveNewLabelParent(by: 1)
+                return nil
+            case 126:  // Up
+                batch.moveNewLabelParent(by: -1)
+                return nil
+            case 36, 76:  // Return
+                batch.createNewLabel()
+                return nil
+            default:
+                return event  // typing goes to the name field
+            }
+        }
+
         if batch.pickerScope != nil {
+            if modifiers == .command, event.keyCode == 45 {  // Command-N
+                batch.openNewLabel()
+                return nil
+            }
             if modifiers == .command, event.keyCode == 51, batch.pickerQuery.isEmpty {
                 batch.closePicker()
                 batch.moveScopeToTrash()

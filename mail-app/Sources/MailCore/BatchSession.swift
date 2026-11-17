@@ -105,6 +105,8 @@ public final class BatchSession: ObservableObject {
     @Published public var pickerQuery = "" {
         didSet { if oldValue != pickerQuery { rebuildPicker(resetHighlight: true) } }
     }
+    /// New label…, open inside Choose a label.
+    @Published public var newLabel: NewLabelForm?
 
     public var onFinish: (() -> Void)?
     public var onKeepInInboxChange: ((Bool) -> Void)?
@@ -798,6 +800,7 @@ public final class BatchSession: ObservableObject {
         pickerQuery = ""
         pickerRows = []
         pickerHighlightedID = nil
+        newLabel = nil
     }
 
     /// The one row the picker is for, when it is for one.
@@ -842,6 +845,42 @@ public final class BatchSession: ObservableObject {
         guard let ids = pickerScope else { return nil }
         closePicker()
         return applyToScope(row.action, scope: ids)
+    }
+
+    // MARK: New label
+
+    /// The labels a new one can go inside.
+    public var newLabelParents: [LabelEntry] { catalog.entries }
+
+    public var newLabelOutcome: NewLabelOutcome { newLabel?.outcome(in: catalog) ?? .empty }
+
+    /// Opens New label… with what was typed in the search as its name.
+    public func openNewLabel() {
+        guard pickerScope != nil else { return }
+        newLabel = NewLabelForm.from(query: pickerQuery, catalog: catalog)
+    }
+
+    /// Back to the label list, with the search as it was.
+    public func cancelNewLabel() {
+        newLabel = nil
+    }
+
+    /// Moves where the new label goes: the top level first, then each label in the list's order.
+    public func moveNewLabelParent(by delta: Int) {
+        guard let form = newLabel else { return }
+        // "" stands for the top level; no mailbox is named "".
+        let ids = [""] + newLabelParents.map(\.mailbox)
+        let moved = Highlight.moved(ids, from: form.parent ?? "", by: delta) ?? ""
+        newLabel?.parent = moved.isEmpty ? nil : moved
+    }
+
+    /// Creates the label and files the picker's scope under it, or files under the label of that
+    /// name when there is one already. Back to the list.
+    @discardableResult
+    public func createNewLabel() -> Task<Void, Never>? {
+        guard let ids = pickerScope, let action = newLabelOutcome.action else { return nil }
+        closePicker()
+        return applyToScope(action, scope: ids)
     }
 
     // MARK: Helpers

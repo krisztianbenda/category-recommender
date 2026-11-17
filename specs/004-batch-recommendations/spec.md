@@ -106,7 +106,7 @@ The owner marks a few rows, for example the ones they are sure about, and applie
 
 - **FR-009**: The system MUST change an email only after an explicit action by the owner that covers that email: approving all, approving marked rows, or deciding that row.
 - **FR-010**: The owner MUST be able to approve every ready recommendation with one action. Rows that are not ready, already done or skipped MUST NOT be affected.
-- **FR-011**: The owner MUST be able to accept, change or reject the recommendation of any single row, by choosing a label, creating a label or choosing Move to Trash, and that decision MUST be applied to that email only.
+- **FR-011**: The owner MUST be able to accept, change or reject the recommendation of any single row, by choosing a label, creating a label (at the top level or inside one of their labels, which they choose) or choosing Move to Trash, and that decision MUST be applied to that email only.
 - **FR-012**: The owner MUST be able to mark several rows and then approve their recommendations, file them all under one chosen label, or move them all to the Trash.
 - **FR-013**: The owner MUST be able to skip a row, so that approving all leaves it out.
 - **FR-014**: Before an action that covers more than one email and moves any of them to the Trash, the window MUST say how many will be filed and how many moved to the Trash, and nothing MUST change until the owner confirms.
