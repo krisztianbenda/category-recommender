@@ -1,8 +1,8 @@
 # Mail integration
 
-File the email selected in macOS Mail under the label or folder the local recommender suggests, in two actions: a shortcut, then Return. It works with every account in Mail: Gmail accounts by their labels, and iCloud, Exchange and other accounts by their folders. When you usually delete emails like it, the recommendation is to move it to the Trash instead. It can also create or delete a label from the same window. Everything runs on this Mac.
+File the email selected in macOS Mail under the label or folder the local recommender suggests, in two actions: a shortcut, then Return. Select several emails and each one gets its own recommendation, which you approve all at once or one by one. It works with every account in Mail: Gmail accounts by their labels, and iCloud, Exchange and other accounts by their folders. When you usually delete emails like it, the recommendation is to move it to the Trash instead. It can also create or delete a label from the same window. Everything runs on this Mac.
 
-Design: [`specs/002-mail-app-integration/`](../specs/002-mail-app-integration/plan.md), and [`specs/003-delete-suggestion/`](../specs/003-delete-suggestion/plan.md) for deleting.
+Design: [`specs/002-mail-app-integration/`](../specs/002-mail-app-integration/plan.md), [`specs/003-delete-suggestion/`](../specs/003-delete-suggestion/plan.md) for deleting, and [`specs/004-batch-recommendations/`](../specs/004-batch-recommendations/plan.md) for several emails at once.
 
 ## Install
 
@@ -44,6 +44,27 @@ defaults write com.catrec.mail idleMinutes -int 60
 ```
 
 If you started `scripts/run-local.sh` yourself, the app uses that service and never stops it.
+
+## Several emails at once
+
+Select two or more emails in Mail and press **Control-Option-L**. The window lists them, newest first, and each row gets its own recommendation as soon as it is ready: a label, a new label, or **Move to Trash**. The window says how many are ready. It takes up to 50 emails; if you selected more, it says how many were left out, and those are not changed.
+
+Every action works on the **marked** rows, or on the highlighted row when none is marked. **Approve all** works on every row with a recommendation that you haven't skipped.
+
+| To | Do this |
+|----|---------|
+| Apply every recommendation that is ready | Press **Command-Return**, or click **Approve all** |
+| Accept one row's recommendation | Highlight it with the arrow keys and press **Return** |
+| File a row under another label | Press **→** or start typing, pick the label, and press **Return**. **Esc** goes back |
+| Mark rows | Press **Space** on each, or **Command-A** for all. **Return** then accepts the marked rows' own recommendations |
+| File marked rows under one label | Mark them, press **→**, pick the label, and press **Return** |
+| Move to the Trash | **Command-Delete**. For more than one email, the window asks first |
+| Leave a row out of Approve all | Press **Delete** to skip it, again to undo |
+| Close | Press **Esc**. Emails you didn't decide on are left as they are |
+
+You can decide a row before its recommendation arrives; it is learned when the recommendation comes. Each decision is learned for its own email, as when you file one email. Done rows stay in the list, dimmed, with what was done. A row that could not be applied says why, and you can try it again.
+
+To take emails out of the Inbox or move them to the Trash, the app first selects exactly those emails in Mail, so you will see Mail's selection change. If Mail won't select exactly them, nothing is archived or deleted, and the row says so. That can happen inside a collapsed conversation: expand it, or turn off **View > Organize by Conversation**.
 
 ## Deleting emails
 
@@ -108,7 +129,8 @@ Labels and folders are read from Mail every time you open the window, and the ac
 
 - The app only talks to the service on this Mac. It refuses any other address, redirects and proxies.
 - Email text stays in memory, and it is gone when the window closes or the decision has been recorded. What the service stores when you file or delete an email is the same as for the web UI.
-- From the Trash, the app reads only the sender and subject of emails from the selected email's sender, at most 20. They go to the service with the request and are not stored.
+- From the Trash, the app reads only the sender and subject of emails from the selected email's sender, at most 20, or from each sender of a batch. They go to the service with the request and are not stored.
+- With several emails selected, the app reads the text of up to 50 of them into memory, in the background. It is gone when the window closes, or once the decisions you made have been learned.
 - `~/.catrec/logs/mail-app.log` has event names and times only.
 - Mail's own connection to Gmail is the only path to Google, and this app adds none.
 
@@ -122,6 +144,7 @@ Labels and folders are read from Mail every time you open the window, and the ac
 | "Mail's Archive command was not available" or "Mail's Delete command was not available" | The command was greyed out in Mail. Click the email in Mail's message list, and try again |
 | "Mail did not put it in the Trash" | In Mail > Settings > Accounts > your Gmail account > Mailbox Behaviors, turn on moving deleted messages to the Trash mailbox, and check the email in Mail |
 | Move to Trash is greyed out | The email is in the Trash already, Mail shows no Trash for the account, or Mail did not give the email an ID |
+| A row says "Mail would not select just this email" | Expand the conversation in Mail, or turn off **View > Organize by Conversation**, and try again |
 | The shortcut does nothing | Mail must be the active app. The shortcut is only active then, so it doesn't take the combination from other apps. The menu bar icon works anywhere |
 | No entry under Mail > Services | System Settings > Keyboard > Keyboard Shortcuts > Services: turn on **Recommend a Label** |
 | "The local service stopped while starting" | Run `scripts/run-local.sh` in a terminal to see why |
@@ -139,9 +162,15 @@ open -n "$HOME/Applications/Category Recommender.app" --args --self-test-local -
 
 `--diagnose` also reports, for each account, whether it is Gmail (`gmail`), whether its Inbox was found (`inboxFound`), whether the Trash was found (`trashFound`), whether through Mail's own Trash (`trashFoundThroughMail`), and how many emails it holds (`trashMessages`).
 
-`--self-test-local` uses mailboxes under On My Mac and one fabricated message. Mail doesn't let scripts delete mailboxes, so `catrec-selftest` and `Import` stay under On My Mac until you delete them. Later runs reuse them.
+`--self-test-local` uses mailboxes under On My Mac and three fabricated messages. It also checks that the app can select two of them, as a batch does. Mail doesn't let scripts delete mailboxes, so `catrec-selftest` and `Import` stay under On My Mac until you delete them. Later runs reuse them.
 
 `--self-test-account` tests the real account on one email you select in the Inbox. In a folder account it creates the folder `catrec-selftest-folder` with a `child` folder under it, puts a copy of the email in `catrec-selftest-folder` and moves the copy to `child`. Your email itself stays in the Inbox and is never moved. The folders stay, holding the copy, for you to delete from the window. In Gmail it creates the label `catrec-selftest-labelled` with a `child` label under it, and files the email under `child`. It then archives the email with Mail's command and puts it back in the Inbox. The labels stay for you to delete from the window. That also tests that an email survives its label being deleted.
+
+To check that Mail lets the app select some of the emails you selected, as a batch does before archiving or deleting, select three or more emails in the Inbox and run the following. It changes no email, only what Mail shows as selected, and puts your selection back. Try it with **View > Organize by Conversation** on and off.
+
+```bash
+open -n "$HOME/Applications/Category Recommender.app" --args --self-test-selection --out /tmp/catrec-selection.json
+```
 
 ## Uninstall
 
@@ -153,10 +182,10 @@ Your labels and what the recommender has learned stay. Delete learned data under
 
 ## Develop
 
-`scripts/test.sh` runs the unit tests and the bridge tests. `tests/e2e.sh` runs the real service with a stub model, and checks the running app only connects to this Mac. All of these use synthetic data. Run the app with `.build/debug/CategoryRecommender --demo` to try the window against a synthetic Mail. Add `--newsletter` for an email like three in the synthetic Trash, which is recommended for deletion.
+`scripts/test.sh` runs the unit tests and the bridge tests. `tests/e2e.sh` runs the real service with a stub model, and checks the running app only connects to this Mac. All of these use synthetic data. Run the app with `.build/debug/CategoryRecommender --demo` to try the window against a synthetic Mail. Add `--newsletter` for an email like three in the synthetic Trash, which is recommended for deletion, or `--batch` for six synthetic emails selected at once. With `--batch --drive report.json`, it presses the batch window's keys and reports what happened.
 
 ```text
 Resources/mail-bridge.js      everything that talks to Mail
-Sources/MailCore/             labels, sync, HTTP client, session state (no UI)
+Sources/MailCore/             labels, sync, HTTP client, session state for one email and for a batch (no UI)
 Sources/CategoryRecommender/  menu bar app, window, shortcut, service start and stop
 ```

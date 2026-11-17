@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
 import vm from "node:vm";
+import { spawnSync } from "node:child_process";
 
 const source = fs.readFileSync(new URL("../Resources/mail-bridge.js", import.meta.url), "utf8");
 
@@ -106,6 +107,10 @@ function withContainerNames(collection, items) {
   Object.defineProperty(collection, "container", {
     value: { name: () => items.map((m) => (m._parent ? m._parent.name() : null)) },
   });
+}
+
+function mailboxPath(m) {
+  return m._parent ? `${mailboxPath(m._parent)}/${m.name()}` : m.name();
 }
 
 class FakeAccount {
@@ -225,15 +230,64 @@ function setup() {
       },
     },
   };
-  const script = { source: null, selects: null };
+  // Selecting messages: like Mail, only a mailbox it accepts (by default every one) changes the
+  // selection. `script.accepts(path)` lets a test refuse some.
+  // `script.forms` lists which ways of naming an email Mail takes (default all); `script.fails` is
+  // an error number for Mail to report instead of selecting.
+  const script = { source: null, selects: null, selections: [], accepts: () => true, forms: null, fails: 0 };
+  const unquote = (q) => q.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  const quoted = /"(?:[^"\\]|\\.)*"/g;
+  const selectMessages = (text) => {
+    const list = /\{(.*)\}/s.exec(text)[1];
+    const found = [];
+    for (const one of list.split(/, (?=\(first message)/)) {
+      const [, container, key, value] = /^\(first message of \((.*)\) whose (id|message id) is (.*)\)$/s.exec(one);
+      const strings = container.match(quoted).map(unquote);
+      const accountName = strings.pop();
+      const path = strings.reverse().join("/");
+      const form = key === "message id" ? "messageId" : container.split(" of ").length === 2 && path.includes("/") ? "wholePath" : "nested";
+      if (script.forms && !script.forms.includes(form)) return;
+      if (!script.accepts(path)) return;
+      const account = accounts.find((a) => a.name() === accountName);
+      const box = allMailboxes(account).find((m) => mailboxPath(m) === path) ??
+        (account._children.find((m) => m._hidden)?._children ?? []).find((m) => mailboxPath(m) === path);
+      const message = key === "id"
+        ? box?.messagesList.find((m) => m.id() === Number(value))
+        : box?.messagesList.find((m) => m.messageId() === unquote(value));
+      if (!message) return;
+      found.push(message);
+    }
+    mail.selection = () => found;
+  };
   const dollar = (x) => x;
   dollar.NSAppleScript = {
     alloc: {
       initWithSource: (text) => ({
-        executeAndReturnError: () => {
+        executeAndReturnError: (error) => {
           script.source = text;
+          const ok = (value = 0) => ({ isNil: () => false, int32Value: value });
+          const failWith = (number) => {
+            error[0] = { isNil: () => false, objectForKey: () => ({ isNil: () => false, intValue: number }) };
+            return null;
+          };
+          const thrown = /^error ".*" number (\d+)$/.exec(text);
+          if (thrown) return failWith(Number(thrown[1]));
+          if (text.includes("count message viewers")) return ok(1);
+          if (text.includes("count (selected messages")) return ok(mail.selection().length);
+          if (text.includes("items 1 thru 2 of (get selected messages")) {
+            const kept = mail.selection().slice(0, 2);
+            mail.selection = () => kept;
+            return ok();
+          }
+          if (text.includes("set selected messages")) {
+            script.selections.push(text);
+            if (script.fails) return failWith(script.fails);
+            selectMessages(text);
+            return ok();
+          }
           selectedMailboxes.length = 0;
           if (script.selects) selectedMailboxes.push(script.selects);
+          return ok();
         },
       }),
     },
@@ -262,18 +316,77 @@ function setup() {
   };
 }
 
-test("selection reads the newest message and refers to all of them", () => {
+test("one selected email is read in full, as before", () => {
   const { mail, inbox, call } = setup();
-  const older = fakeMessage(1, inbox, { date: 1000, subject: "Older" });
-  const newer = fakeMessage(2, inbox, { date: 2000, subject: "Newer" });
-  mail.selection = () => [older, newer];
-  const { selection, labels } = call({ command: "opening" }).result;
-  assert.equal(selection.total, 2);
-  assert.deepEqual(selection.messages.map((m) => m.id), [1, 2]);
-  assert.equal(selection.messages[0].account, "Google");
-  assert.equal(selection.latest.subject, "Newer");
+  mail.selection = () => [fakeMessage(1, inbox, { date: 1000, subject: "Only" })];
+  const { selection, labels, viewed } = call({ command: "opening" }).result;
+  assert.equal(selection.total, 1);
+  assert.equal(selection.latest.subject, "Only");
   assert.deepEqual(selection.latest.to, ["Owner <owner@example.test>"]);
+  assert.equal(selection.messages[0].inInbox, true);
+  assert.equal(viewed, undefined);
   assert.ok(labels.mailboxes.includes("Family/Baby"));
+});
+
+test("several selected emails open a batch: newest first, sender and subject, no text", () => {
+  const { mail, inbox, family, selectedMailboxes, call } = setup();
+  selectedMailboxes.push(inbox);
+  const older = fakeMessage(1, inbox, { date: 1000, subject: "Older", body: "SECRET-BODY" });
+  const newer = fakeMessage(2, family, { date: 2000, subject: "Newer", sender: "Mum <mum@example.test>" });
+  mail.selection = () => [older, newer];
+  const out = call({ command: "opening" });
+  const { selection, labels, viewed } = out.result;
+  assert.equal(selection.total, 2);
+  assert.equal(selection.latest, null);
+  assert.deepEqual(
+    selection.messages.map((m) => [m.id, m.mailbox, m.subject]),
+    [
+      [2, "Family", "Newer"],
+      [1, "INBOX", "Older"],
+    ],
+  );
+  assert.equal(selection.messages[0].from, "Mum <mum@example.test>");
+  assert.equal(selection.messages[0].account, "Google");
+  assert.equal(selection.messages[0].messageId, "mid-2");
+  assert.equal("inInbox" in selection.messages[0], false);
+  assert.deepEqual(viewed, ["INBOX"]);
+  assert.ok(labels.mailboxes.includes("Family/Baby"));
+  assert.ok(!JSON.stringify(out).includes("SECRET-BODY"));
+});
+
+test("a batch keeps the 50 newest, and counts the whole selection", () => {
+  const { mail, inbox, call } = setup();
+  const many = Array.from({ length: 70 }, (_, i) => fakeMessage(i + 1, inbox, { date: (i * 37) % 70 }));
+  mail.selection = () => many;
+  const { selection } = call({ command: "opening" }).result;
+  assert.equal(selection.total, 70);
+  assert.equal(selection.messages.length, 50);
+  const dates = selection.messages.map((m) => m.date);
+  assert.deepEqual(dates, [...dates].sort((a, b) => b - a));
+  assert.equal(dates.at(-1), 20);
+});
+
+test("read finds the copy filing acts on, whether it is in the Inbox, and the text", () => {
+  const { inbox, family, allMail, call } = setup();
+  fakeMessage(50, allMail, { messageId: "mid-shared", subject: "Shared", body: "Hello" });
+  fakeMessage(51, inbox, { messageId: "mid-shared" });
+  fakeMessage(60, allMail, { messageId: "mid-viewed" });
+  fakeMessage(62, family, { messageId: "mid-viewed" });
+  const { items } = call({
+    command: "read",
+    account: "Google",
+    viewed: ["Family"],
+    refs: [
+      { id: 50, mailbox: "[Gmail]/Összes levél", messageId: "mid-shared" },
+      { id: 60, mailbox: "[Gmail]/Összes levél", messageId: "mid-viewed" },
+      { id: 99, mailbox: "INBOX", messageId: "mid-gone" },
+    ],
+  }).result;
+  assert.deepEqual(items[0].placement, { id: 51, mailbox: "INBOX", inInbox: true });
+  assert.equal(items[0].email.subject, "Shared");
+  assert.equal(items[0].email.body, "Hello");
+  assert.deepEqual(items[1].placement, { id: 62, mailbox: "Family", inInbox: false });
+  assert.deepEqual(items[2], { messageId: "mid-gone", found: false });
 });
 
 test("a Gmail email is filed from the copy in the Inbox, not from All Mail", () => {
@@ -386,12 +499,20 @@ test("a folder account's folders are read, with which of them are its own Inbox,
   assert.deepEqual(context.call({ command: "labels", account: "iCloud" }).result, result.labels);
 });
 
-test("says whether each selected email is in its account's Inbox", () => {
+test("says whether each email of a batch is in its account's Inbox", () => {
   const context = setup();
-  const { bills } = withFolders(context);
-  context.mail.selection = () => [fakeMessage(1, bills), fakeMessage(2, context.inbox), fakeMessage(3, context.family)];
-  const { messages } = context.call({ command: "opening" }).result.selection;
-  assert.deepEqual(messages.map((m) => m.inInbox), [false, true, false]);
+  const { inbox, bills } = withFolders(context);
+  fakeMessage(1, bills);
+  fakeMessage(2, inbox);
+  const refs = [
+    { id: 1, mailbox: "Bills", messageId: "mid-1" },
+    { id: 2, mailbox: "Beérkezett", messageId: "mid-2" },
+  ];
+  const { items } = context.call({ command: "read", account: "iCloud", viewed: [], refs }).result;
+  assert.deepEqual(
+    items.map((i) => i.placement.inInbox),
+    [false, true],
+  );
 });
 
 test("an email under On My Mac has no account, and gets no labels", () => {
@@ -948,4 +1069,221 @@ test("holding with one email, or none that can be matched, asks Mail for little 
   const unusable = [{ from: "No address", subject: "Check-up on Friday" }, { from: "desk@clinic.example.test", subject: "" }];
   const none = call({ command: "holding", account: "Google", emails: unusable, mailboxes: ["Family/Baby"] });
   assert.deepEqual(none.result, { counts: [0] });
+});
+
+// Batches (specs/004-batch-recommendations): acting on some of the selected emails.
+
+function batchOfThree(context) {
+  const { mail, inbox, allMail } = context;
+  const shown = [1, 2, 3].map((n) => fakeMessage(10 + n, allMail, { messageId: `mid-${n}`, date: n }));
+  for (const n of [1, 2, 3]) fakeMessage(20 + n, inbox, { messageId: `mid-${n}`, date: n });
+  mail.selection = () => shown;
+  const email = (n) => ({
+    messageId: `mid-${n}`,
+    view: { id: 10 + n, mailbox: "[Gmail]/Összes levél" },
+    placement: { id: 20 + n, mailbox: "INBOX" },
+  });
+  return { shown, email };
+}
+
+test("archiving some emails of a batch selects exactly them first, then clicks Archive", () => {
+  const context = setup();
+  const { inbox, menu, script, call } = context;
+  const { email } = batchOfThree(context);
+  menu.titles = ["Archive"];
+  menu.onClick = () => {
+    const ids = context.mail.selection().map((m) => m.messageId());
+    inbox.messagesList = inbox.messagesList.filter((m) => !ids.includes(m.messageId()));
+  };
+  const out = call({
+    command: "archive", account: "Google", titles: ["Archive"], viewed: ["INBOX"],
+    messageIds: ["mid-1", "mid-3"], select: [email(1), email(3)],
+  });
+  assert.equal(out.result.result, "archived", JSON.stringify(out));
+  assert.equal(menu.clicks, 1);
+  assert.match(script.selections[0], /\(first message of \(mailbox "Összes levél" of mailbox "\[Gmail\]" of account "Google"\) whose id is 11\)/);
+  assert.deepEqual(inbox.messagesList.map((m) => m.messageId()), ["mid-2"]);
+});
+
+test("when Mail will not select the emails it showed, their copies are selected instead", () => {
+  const context = setup();
+  const { menu, script, call } = context;
+  const { email } = batchOfThree(context);
+  script.accepts = (path) => path === "INBOX";
+  menu.titles = ["Archive"];
+  menu.onClick = () => context.inbox.messagesList.splice(0);
+  const out = call({
+    command: "archive", account: "Google", titles: ["Archive"], messageIds: ["mid-2"], select: [email(2)],
+  });
+  assert.equal(out.result.result, "archived");
+  // The view in every form first, then the copy in the Inbox.
+  assert.equal(script.selections.length, 4);
+  assert.match(script.selections[3], /\(first message of \(mailbox "INBOX" of account "Google"\) whose id is 22\)/);
+});
+
+test("nothing is clicked when Mail's selection cannot be made exactly the action's emails", () => {
+  const context = setup();
+  const { menu, script, call } = context;
+  const { email } = batchOfThree(context);
+  script.accepts = () => false;
+  menu.titles = ["Archive", "Delete"];
+  for (const command of ["archive", "trash"]) {
+    const out = call({
+      command, account: "Google", titles: ["Archive", "Delete"], viewed: ["INBOX"],
+      messageIds: ["mid-1"], select: [email(1)],
+    });
+    assert.equal(out.result.result, "selectionChanged");
+  }
+  assert.equal(menu.clicks, 0);
+  // Without a reference per email, it never even tries.
+  const out = call({ command: "trash", account: "Google", titles: ["Delete"], messageIds: ["mid-1", "mid-2"], select: [email(1)] });
+  assert.equal(out.result.result, "selectionChanged");
+  assert.equal(menu.clicks, 0);
+});
+
+test("moving some emails of a batch to the Trash selects exactly them, and reports any that did not arrive", () => {
+  const context = setup();
+  const { trash, menu, call } = context;
+  const { email } = batchOfThree(context);
+  menu.titles = ["Delete"];
+  menu.onClick = () => fakeMessage(31, trash, { messageId: "mid-1" }); // mid-3 never arrives
+  const out = call({
+    command: "trash", account: "Google", titles: ["Delete"], messageIds: ["mid-1", "mid-3"], select: [email(1), email(3)],
+  });
+  assert.deepEqual(out.result, { result: "notInTrash", left: ["mid-3"] });
+  assert.deepEqual(context.mail.selection().map((m) => m.messageId()), ["mid-1", "mid-3"]);
+});
+
+test("an email of a batch in the Trash already is refused before anything is selected", () => {
+  const context = setup();
+  const { trash, menu, script, call } = context;
+  const { email } = batchOfThree(context);
+  fakeMessage(40, trash, { messageId: "mid-2" });
+  menu.titles = ["Delete"];
+  const out = call({
+    command: "trash", account: "Google", titles: ["Delete"], messageIds: ["mid-1", "mid-2"], select: [email(1), email(2)],
+  });
+  assert.equal(out.result.result, "alreadyInTrash");
+  assert.equal(script.selections.length, 0);
+  assert.equal(menu.clicks, 0);
+});
+
+test("archive reports which emails are still in the Inbox", () => {
+  const context = setup();
+  const { menu, call } = context;
+  const { email } = batchOfThree(context);
+  menu.titles = ["Archive"];
+  const out = call({
+    command: "archive", account: "Google", titles: ["Archive"], messageIds: ["mid-1", "mid-2"], select: [email(1), email(2)],
+  });
+  assert.deepEqual(out.result, { result: "stillThere", left: ["mid-1", "mid-2"] });
+});
+
+test("the Trash is read once for every sender of a batch, and says which emails are in it", () => {
+  const { inbox, trash, call } = setup();
+  fakeMessage(1, inbox, { sender: deals, messageId: "mid-a" });
+  fakeMessage(10, trash, { sender: "deals@shop.example.test", subject: "Deals 1", date: 1000, body: "SECRET-BODY" });
+  fakeMessage(11, trash, { sender: "Shop <DEALS@shop.example.test>", subject: "Deals 2", date: 2000 });
+  fakeMessage(12, trash, { sender: "Dad <dad@example.test>", subject: "Lunch", date: 3000, messageId: "mid-b" });
+  const out = call({
+    command: "trashSimilar", account: "Google",
+    senders: [deals, "Dad <dad@example.test>", "Shop <deals@shop.example.test>", "Nobody"],
+    messageIds: ["mid-a", "mid-b"],
+  });
+  assert.deepEqual(out.result, {
+    found: true,
+    inTrash: true,
+    inTrashIds: ["mid-b"],
+    bySender: {
+      "deals@shop.example.test": [
+        { from: "Shop <DEALS@shop.example.test>", subject: "Deals 2" },
+        { from: "deals@shop.example.test", subject: "Deals 1" },
+      ],
+      "dad@example.test": [],
+      nobody: [],
+    },
+    messages: [],
+  });
+  assert.ok(!JSON.stringify(out).includes("SECRET-BODY"));
+});
+
+test("a batch's Trash lookup without a Trash finds nothing", () => {
+  const { trashMailboxes, trash, call } = setup();
+  trashMailboxes.splice(0);
+  trash._name = "Something else";
+  assert.deepEqual(call({ command: "trashSimilar", account: "Google", senders: [deals], messageIds: ["mid-a"] }).result, {
+    found: false, inTrash: false, inTrashIds: [], bySender: {}, messages: [],
+  });
+});
+
+test("the selection self-test selects two of the selected emails, restores the rest, and reports pass or fail only", () => {
+  const context = setup();
+  const { shown } = batchOfThree(context);
+  const out = context.call({ command: "selftestSelection" });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.deepEqual(out.result.steps, {
+    errorsSeen: "pass", viewers: 1, sameViewer: "pass", narrowItself: "pass",
+    selectViewNested: "pass", selectPlacementNested: "pass",
+    selectViewWholePath: "pass", selectPlacementWholePath: "pass",
+    selectViewMessageId: "pass", selectPlacementMessageId: "pass",
+    restored: "pass",
+  });
+  assert.deepEqual(context.mail.selection(), shown);
+  assert.equal(context.menu.clicks, 0);
+  assert.equal(context.calls.length, 0);
+  assert.ok(!JSON.stringify(out).includes("mid-"));
+});
+
+test("the selection self-test needs three selected emails", () => {
+  const context = setup();
+  context.mail.selection = () => [fakeMessage(1, context.inbox)];
+  const out = context.call({ command: "selftestSelection" });
+  assert.equal(out.ok, false);
+});
+
+// The scripts the bridge hands to Mail must compile. The fake Mail above parses them loosely, so this
+// asks macOS's own compiler. It only compiles: Mail is not contacted.
+test("every AppleScript the bridge sends to Mail compiles", { skip: process.platform !== "darwin" }, () => {
+  const context = setup();
+  const { email } = batchOfThree(context);
+  const { menu, script, call, gmail } = context;
+  const odd = new FakeMailbox('Odd" & "x', gmail);
+  gmail._children.push(odd);
+  menu.titles = ["Archive"];
+  const sources = [];
+  const record = () => script.source && sources.push(script.source);
+  script.accepts = () => false; // so that every way of naming an email is tried
+  call({ command: "archive", account: "Google", titles: ["Archive"], messageIds: ["mid-1", "mid-2"], select: [email(1), email(2)] });
+  sources.push(...script.selections);
+  script.selects = odd;
+  call({ command: "deleteBegin", account: "Google", path: odd.name(), titles: [] });
+  record();
+  assert.ok(sources.some((x) => x.includes("whose message id is")) && sources.some((x) => x.includes('mailbox "[Gmail]/')));
+  for (const source of sources) {
+    const out = spawnSync("/usr/bin/osacompile", ["-o", "/dev/null", "-e", source], { encoding: "utf8" });
+    assert.equal(out.status, 0, `${source}\n${out.stderr}`);
+  }
+});
+
+test("when Mail takes an email only by its Message-ID, that is what selects it", () => {
+  const context = setup();
+  const { menu, script, call } = context;
+  const { email } = batchOfThree(context);
+  script.forms = ["messageId"];
+  menu.titles = ["Archive"];
+  menu.onClick = () => context.inbox.messagesList.splice(0);
+  const out = call({ command: "archive", account: "Google", titles: ["Archive"], messageIds: ["mid-1"], select: [email(1)] });
+  assert.equal(out.result.result, "archived", JSON.stringify(out));
+  assert.match(script.selections.at(-1), /whose message id is "mid-1"\)/);
+});
+
+test("Mail's error numbers from selecting are reported, and nothing is clicked", () => {
+  const context = setup();
+  const { menu, script, call } = context;
+  const { email } = batchOfThree(context);
+  script.fails = -1728;
+  menu.titles = ["Delete"];
+  const out = call({ command: "trash", account: "Google", titles: ["Delete"], messageIds: ["mid-1"], select: [email(1)] });
+  assert.deepEqual(out.result, { result: "selectionChanged", selectErrors: [-1728] });
+  assert.equal(menu.clicks, 0);
 });

@@ -31,11 +31,29 @@ echo "== client and session against the real service"
 CATREC_TEST_BASE_URL="$SERVICE_URL" CATREC_TEST_REDIRECT_URL="$REDIRECT_URL" \
   "$DIR/scripts/test.sh" --filter LiveServiceTests
 
+echo "== a batch in the window, through real key events"
+cd "$DIR"
+swift build >/dev/null
+CATREC_BASE_URL="$SERVICE_URL" CATREC_MAIL_LOG="$WORK/batch.log" \
+  .build/debug/CategoryRecommender --demo --batch --drive "$WORK/batch-drive.json"
+cat "$WORK/batch-drive.json" && echo
+if [[ ! -s "$WORK/batch-drive.json" ]] || grep -q false "$WORK/batch-drive.json"; then
+  echo "batch window keys:" >&2
+  cat "$WORK/batch-drive.json" >&2
+  exit 1
+fi
+if grep -qE 'newborn|clinic|Family|Gadgets|Porto|example' "$WORK/batch.log"; then
+  echo "the batch log contains personal-looking content" >&2
+  exit 1
+fi
+grep -q batch_opened "$WORK/batch.log" || { echo "no batch_opened event" >&2; exit 1; }
+echo "ok"
+
 echo "== the running app only connects to this computer"
 cd "$DIR"
 swift build >/dev/null
 CATREC_BASE_URL="$SERVICE_URL" CATREC_MAIL_LOG="$WORK/app.log" \
-  .build/debug/CategoryRecommender --demo &
+  .build/debug/CategoryRecommender --demo --batch &
 APP_PID=$!
 sleep 5
 OUTSIDE="$(lsof -nP -a -p "$APP_PID" -iTCP -iUDP 2>/dev/null | awk 'NR>1 {print $9}' | grep -vE '127\.0\.0\.1|\[::1\]' || true)"

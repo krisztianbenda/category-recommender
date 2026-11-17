@@ -13,6 +13,9 @@ final class DemoMail: MailSource, @unchecked Sendable {
     private let trashed: [TrashedEmail]
     private(set) var filed: [(target: String, items: [FileItem])] = []
     private(set) var movedToTrash: [[String]] = []
+    private(set) var archived: [[String]] = []
+    /// A batch (`--batch`): several emails, each with its own Message-ID.
+    private var batch: [(ref: MailMessageRef, email: Email)] = []
 
     init(email: Email? = nil) {
         self.email =
@@ -41,8 +44,51 @@ final class DemoMail: MailSource, @unchecked Sendable {
         self.trashed = trashed
     }
 
+    /// Six synthetic emails selected at once (specs/004-batch-recommendations): two for one label,
+    /// one for another, one that needs a new label, a newsletter like three in the Trash, and one with
+    /// no text at all.
+    static func batch() -> DemoMail {
+        let shop = "Shop Deals <deals@shop.example.test>"
+        let demo = DemoMail(
+            email: Email(from: "", subject: "", body: ""),
+            trashed: (1...3).map { TrashedEmail(from: shop, subject: "Weekly shoe discount voucher \($0)") })
+        let emails = [
+            Email(
+                from: "Dr. Example Clinic <clinic@example.test>", subject: "Your newborn's check-up on Friday",
+                body: "Hello, this is a reminder that the baby's paediatrician appointment is on Friday at 10:00."),
+            Email(
+                from: "Nursery Example <hello@nursery.example.test>", subject: "Baby swimming lessons start in May",
+                body: "Your baby's swimming course for infants starts on 5 May. Bring a towel and a swim nappy."),
+            Email(
+                from: "Example Energy <billing@energy.example.test>", subject: "Your invoice for October",
+                body: "Invoice 2026-10 is attached. Amount due: 42.00 EUR by 15 November."),
+            Email(
+                from: "Example Air <trips@air.example.test>", subject: "Booking confirmed: Lisbon to Porto",
+                body: "Your flight to Porto on 12 June is confirmed. Check in opens 24 hours before departure."),
+            Email(
+                from: shop, subject: "Weekly shoe discount voucher 4",
+                body: "Voucher 4: discount on shoes, sneakers and boots this weekend only. Unsubscribe anytime."),
+            Email(from: "Unknown <noreply@example.test>", subject: "", body: ""),
+        ]
+        demo.batch = emails.enumerated().map { i, email in
+            let ref = MailMessageRef(
+                id: 100 + i, mailbox: "INBOX", account: "Demo", date: Double(2_000_000 - i * 1000),
+                messageId: "demo-\(i + 1)@example.test", from: email.from, subject: email.subject)
+            return (ref, email)
+        }
+        return demo
+    }
+
     func opening() async throws -> MailOpening {
-        MailOpening(
+        let batch = lock.withLock { self.batch }
+        if !batch.isEmpty {
+            return MailOpening(
+                selection: MailSelection(total: batch.count, messages: batch.map(\.ref), latest: nil),
+                accounts: [MailAccount(name: "Demo", addresses: ["demo@example.test"])],
+                labels: lock.withLock { AccountLabels(mailboxes: mailboxes, inbox: "INBOX") },
+                viewed: ["INBOX"])
+        }
+        return MailOpening(
             selection: MailSelection(
                 messages: [MailMessageRef(id: 1, mailbox: "INBOX", account: "Demo", messageId: "demo@example.test")], latest: email),
             accounts: [MailAccount(name: "Demo", addresses: ["demo@example.test"])],
@@ -90,5 +136,36 @@ final class DemoMail: MailSource, @unchecked Sendable {
     func moveToTrash(messageIds: [String], account: String) async throws -> TrashResult {
         lock.withLock { movedToTrash.append(messageIds) }
         return .trashed
+    }
+
+    func read(_ refs: [MailMessageRef], viewed: [String], account: String) async throws -> [ReadEmail] {
+        let batch = lock.withLock { self.batch }
+        return refs.map { ref in
+            guard let found = batch.first(where: { $0.ref.messageId == ref.messageId }) else {
+                return ReadEmail(messageId: ref.messageId, found: false)
+            }
+            return ReadEmail(
+                messageId: ref.messageId, placement: Placement(id: ref.id, mailbox: ref.mailbox, inInbox: true),
+                email: found.email)
+        }
+    }
+
+    func archive(_ emails: [SelectedEmail], viewed: [String], account: String) async throws -> ArchiveOutcome {
+        lock.withLock { archived.append(emails.map(\.messageId)) }
+        return ArchiveOutcome(result: .archived)
+    }
+
+    func moveToTrash(_ emails: [SelectedEmail], viewed: [String], account: String) async throws -> TrashOutcome {
+        lock.withLock { movedToTrash.append(emails.map(\.messageId)) }
+        return TrashOutcome(result: .trashed)
+    }
+
+    func trashSimilar(senders: [String], messageIds: [String], account: String) async throws -> TrashLookups {
+        var bySender: [String: [TrashedEmail]] = [:]
+        for sender in senders {
+            let address = TrashLookups.address(sender)
+            bySender[address] = trashed.filter { TrashLookups.address($0.from) == address }
+        }
+        return TrashLookups(bySender: bySender)
     }
 }

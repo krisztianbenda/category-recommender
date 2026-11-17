@@ -32,6 +32,16 @@ struct ScriptedMail: MailSource {
         var limit: Int?
         var mailboxes: [String]?
         var emails: [LearnedEmail]?
+        var senders: [String]?
+        var viewed: [String]?
+        var refs: [Ref]?
+        var select: [SelectedEmail]?
+    }
+
+    private struct Ref: Encodable {
+        let id: Int
+        let mailbox: String
+        let messageId: String?
     }
 
     private func call<Result: Decodable>(_ command: Command, timeout: TimeInterval) async throws -> Result {
@@ -115,19 +125,22 @@ struct ScriptedMail: MailSource {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("catrec-selftest-\(stamp)")
         let mailbox = root.appendingPathComponent("catrec-selftest-\(stamp).mbox")
         try FileManager.default.createDirectory(at: mailbox, withIntermediateDirectories: true)
-        let content = [
-            "From selftest@example.test Thu Nov  5 12:00:00 2026",
-            "From: Self Test <selftest@example.test>",
-            "To: owner@example.test",
-            "Subject: Self-test subject",
-            "Date: Thu, 05 Nov 2026 12:00:00 +0000",
-            "Message-ID: <catrec-selftest-\(stamp)@example.test>",
-            "MIME-Version: 1.0",
-            "Content-Type: text/plain; charset=utf-8",
-            "",
-            "Self-test body. This message is fabricated.",
-            "",
-        ].joined(separator: "\n")
+        // Three fabricated messages: the self-test selects two of them, as a batch does.
+        let content = (1...3).map { n in
+            [
+                "From selftest@example.test Thu Nov  5 12:00:0\(n) 2026",
+                "From: Self Test <selftest@example.test>",
+                "To: owner@example.test",
+                "Subject: Self-test subject",
+                "Date: Thu, 05 Nov 2026 12:00:0\(n) +0000",
+                "Message-ID: <catrec-selftest-\(stamp)-\(n)@example.test>",
+                "MIME-Version: 1.0",
+                "Content-Type: text/plain; charset=utf-8",
+                "",
+                "Self-test body. This message is fabricated.",
+                "",
+            ].joined(separator: "\n")
+        }.joined(separator: "\n")
         try content.write(to: mailbox.appendingPathComponent("mbox"), atomically: true, encoding: .utf8)
         return mailbox
     }
@@ -174,6 +187,41 @@ struct ScriptedMail: MailSource {
             // The first time, macOS may ask for permission to use System Events while this runs.
             timeout: 120)
         return reply.result
+    }
+
+    // Batches (specs/004-batch-recommendations/contracts/mail-bridge.md).
+
+    private struct ReadReply: Decodable { let items: [ReadEmail] }
+
+    func read(_ refs: [MailMessageRef], viewed: [String], account: String) async throws -> [ReadEmail] {
+        let reply: ReadReply = try await call(
+            Command(
+                command: "read", account: account, viewed: viewed,
+                refs: refs.map { Ref(id: $0.id, mailbox: $0.mailbox, messageId: $0.messageId) }),
+            timeout: 20 + 3 * TimeInterval(refs.count))
+        return reply.items
+    }
+
+    func archive(_ emails: [SelectedEmail], viewed: [String], account: String) async throws -> ArchiveOutcome {
+        try await call(
+            Command(
+                command: "archive", account: account, titles: Self.menuTitles(.archive),
+                messageIds: emails.map(\.messageId), viewed: viewed, select: emails),
+            timeout: 120 + 2 * TimeInterval(emails.count))
+    }
+
+    func moveToTrash(_ emails: [SelectedEmail], viewed: [String], account: String) async throws -> TrashOutcome {
+        try await call(
+            Command(
+                command: "trash", account: account, titles: Self.menuTitles(.delete),
+                messageIds: emails.map(\.messageId), viewed: viewed, select: emails),
+            timeout: 120 + 2 * TimeInterval(emails.count))
+    }
+
+    func trashSimilar(senders: [String], messageIds: [String], account: String) async throws -> TrashLookups {
+        try await call(
+            Command(command: "trashSimilar", account: account, messageIds: messageIds, limit: 20, senders: senders),
+            timeout: 30 + TimeInterval(senders.count))
     }
 
     private struct Started: Decodable {

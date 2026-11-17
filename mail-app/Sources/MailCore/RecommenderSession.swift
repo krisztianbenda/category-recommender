@@ -138,15 +138,17 @@ public final class RecommenderSession: ObservableObject {
 
     // MARK: Starting
 
+    /// Reads Mail's selection, or uses the opening the panel read already.
     @discardableResult
-    public func start() -> Task<Void, Never> {
-        Task { await read() }
+    public func start(with opening: MailOpening? = nil) -> Task<Void, Never> {
+        Task { await read(opening) }
     }
 
-    private func read() async {
+    private func read(_ given: MailOpening?) async {
         stage = .reading
         do {
-            let opening = try await mail.opening()
+            let opening: MailOpening
+            if let given { opening = given } else { opening = try await mail.opening() }
             let selection = opening.selection
             guard selection.running else {
                 stage = .blocked(.mailNotRunning)
@@ -251,7 +253,7 @@ public final class RecommenderSession: ObservableObject {
             }
             let lookup = await trashLookup.value
             let allowDelete = canTrash && lookup?.found == true
-            let suggestion = try await suggestWithRetry(
+            let suggestion = try await api.suggestWithRetry(
                 email: email, setId: result.setId, allowDelete: allowDelete,
                 trash: allowDelete ? lookup?.messages ?? [] : [])
             backend.noteActivity()
@@ -264,17 +266,6 @@ public final class RecommenderSession: ObservableObject {
         }
     }
 
-    /// A first request with many labels can outlast the service's model timeout. The model keeps
-    /// what it read in its prompt cache, so one retry usually answers at once.
-    private func suggestWithRetry(
-        email: Email, setId: String, allowDelete: Bool, trash: [TrashedEmail]
-    ) async throws -> Suggestion {
-        do {
-            return try await api.suggest(email: email, setId: setId, allowDelete: allowDelete, trash: trash)
-        } catch ServiceError.api(status: 503, code: "llm_unavailable", _) {
-            return try await api.suggest(email: email, setId: setId, allowDelete: allowDelete, trash: trash)
-        }
-    }
 
     // MARK: Rows and keyboard
 
@@ -284,63 +275,19 @@ public final class RecommenderSession: ObservableObject {
     }
 
     private func rebuildRows() {
-        var out: [LabelRow] = []
-        let search = LabelText.normalise(query)
-        if !search.isEmpty {
-            out = catalog.entries
-                .filter { LabelText.normalise($0.path).contains(search) }
-                .map { Self.row($0, .all) }
-            if let typed = LabelText.cleanTyped(query), catalog.entry(forPath: typed) == nil,
-                !catalog.isAccountFolder(typed),
-                !catalog.entries.contains(where: { $0.mailbox.caseInsensitiveCompare(typed) == .orderedSame })
-            {
-                out.append(
-                    LabelRow(id: "create:\(typed)", title: typed, action: .createTyped(typed), section: .create))
-            }
-        } else {
-            var taken = Set<String>()
-            if case .ready(let suggestion) = recommendation {
-                // When deleting is suggested, the label it would go to if kept comes next.
-                let toTrash = suggestion.action == .delete && canTrash
-                if toTrash { out.append(.trash) }
-                let keep: RowSection = toTrash ? .likely : .recommended
-                if suggestion.isNew, let proposal = suggestion.newCategory {
-                    out.append(
-                        LabelRow(
-                            id: "proposal", title: proposal.path, action: .acceptProposal(proposal),
-                            section: keep))
-                } else if let entry = catalog.entry(forPath: suggestion.category) {
-                    out.append(Self.row(entry, keep))
-                    taken.insert(entry.key)
-                } else if !deletedKeys.contains(LabelText.pathKey(suggestion.category)) {
-                    out.append(
-                        LabelRow(
-                            id: "recreate", title: suggestion.category, action: .recreate(suggestion.category),
-                            section: keep))
-                }
-                for runner in suggestion.runnersUp {
-                    guard let entry = catalog.entry(forPath: runner.path), taken.insert(entry.key).inserted else {
-                        continue
-                    }
-                    out.append(Self.row(entry, .likely))
-                }
-            }
-            out += catalog.entries.filter { !taken.contains($0.key) }.map { Self.row($0, .all) }
-        }
+        let suggestion: Suggestion?
+        if case .ready(let ready) = recommendation { suggestion = ready } else { suggestion = nil }
+        let out = LabelPicker.rows(
+            catalog: catalog, suggestion: suggestion, canTrash: canTrash, deletedKeys: deletedKeys, query: query)
         rows = out
         if !userMovedHighlight || !out.contains(where: { $0.id == highlightedID }) {
             highlightedID = out.first?.id
         }
     }
 
-    private static func row(_ entry: LabelEntry, _ section: RowSection) -> LabelRow {
-        LabelRow(id: "label:\(entry.key)", title: entry.path, action: .existing(entry), section: section)
-    }
-
     public func moveHighlight(by delta: Int) {
-        guard !rows.isEmpty else { return }
-        let current = rows.firstIndex { $0.id == highlightedID } ?? 0
-        highlightedID = rows[min(max(current + delta, 0), rows.count - 1)].id
+        guard let next = Highlight.moved(rows.map(\.id), from: highlightedID, by: delta) else { return }
+        highlightedID = next
         userMovedHighlight = true
     }
 
@@ -473,41 +420,9 @@ public final class RecommenderSession: ObservableObject {
     }
 
     /// What to allow so that the app can use Mail's menus. Nil when permissions are not the problem.
-    public nonisolated static func menuAdvice(_ problem: MenuProblem) -> String? {
-        switch problem {
-        case .notAllowed:
-            return "macOS does not let Category Recommender use Mail's menus. Turn it on in System Settings "
-                + "> Privacy & Security > Accessibility. If it is on already, that entry is from before the app "
-                + "was reinstalled: remove it with \u{2212}, and add the app again."
-        case .systemEventsNotAllowed:
-            return "macOS does not let Category Recommender use System Events. Turn on System Events under "
-                + "Category Recommender in System Settings > Privacy & Security > Automation."
-        case .commandUnavailable:
-            return nil
-        }
-    }
+    public nonisolated static func menuAdvice(_ problem: MenuProblem) -> String? { MailAdvice.menu(problem) }
 
-    nonisolated static func trashProblem(_ result: TrashResult) -> String? {
-        switch result {
-        case .trashed:
-            return nil
-        case .notAllowed, .systemEventsNotAllowed:
-            let problem: MenuProblem = result == .notAllowed ? .notAllowed : .systemEventsNotAllowed
-            return "Not moved to the Trash. \(menuAdvice(problem)!) For now, press Delete in Mail."
-        case .commandUnavailable:
-            return "Not moved to the Trash, because Mail's Delete command was not available. "
-                + "Click the email in Mail's list, and try again."
-        case .selectionChanged:
-            return "Not moved to the Trash, because the selection in Mail changed."
-        case .alreadyInTrash:
-            return "It is in the Trash already. Deleting it there would erase it for good, so nothing was done."
-        case .noTrash:
-            return "Not moved to the Trash, because Mail shows no Trash for this account."
-        case .notInTrash:
-            return "Mail did not put it in the Trash. Check it in Mail, and the Trash setting under "
-                + "Mail > Settings > Accounts > Mailbox Behaviors."
-        }
-    }
+    nonisolated static func trashProblem(_ result: TrashResult) -> String? { MailAdvice.trash(result) }
 
     private func finish() {
         busy = false
@@ -546,48 +461,8 @@ public final class RecommenderSession: ObservableObject {
     }
 
     private func sendFeedback(suggestion: Suggestion, row: LabelRow, email: Email) async throws {
-        switch row.action {
-        case .trash:
-            try await api.feedback(suggestionId: suggestion.suggestionId, email: email, decision: .delete)
-        case .existing(let entry):
-            guard catalog.isConsidered(entry) else { return }
-            // When deleting was suggested, "confirm" would mean delete: filing is a choice then.
-            let isSuggested =
-                suggestion.action == .file && !suggestion.isNew
-                && LabelText.pathKey(suggestion.category) == entry.key
-            try await api.feedback(
-                suggestionId: suggestion.suggestionId, email: email,
-                decision: isSuggested ? .confirm : .choose(entry.path))
-        case .acceptProposal(let proposal):
-            try await api.feedback(
-                suggestionId: suggestion.suggestionId, email: email,
-                decision: suggestion.action == .file ? .confirm : .acceptNew(proposal))
-        case .recreate(let path):
-            try await api.feedback(
-                suggestionId: suggestion.suggestionId, email: email,
-                decision: suggestion.action == .file ? .confirm : .choose(path))
-        case .createTyped(let mailbox):
-            guard let new = catalog.newCategory(forMailbox: mailbox) else { return }
-            if new.parentIsKnown {
-                do {
-                    try await api.feedback(
-                        suggestionId: suggestion.suggestionId, email: email, decision: .acceptNew(new.category))
-                    return
-                } catch ServiceError.api(status: 400, _, _) {
-                    // Too close to an existing name for accept_new; add it explicitly below.
-                }
-            }
-            try await addThenChoose(new.category.path, email: email)
-        }
-    }
-
-    /// `accept_new` only takes parents the suggestion knew about. For anything else, add the
-    /// category and teach through a fresh suggestion.
-    private func addThenChoose(_ path: String, email: Email) async throws {
-        guard let setId else { return }
-        _ = try await api.addCategory(setId: setId, path: path)
-        let fresh = try await api.suggest(email: email, setId: setId)
-        try await api.feedback(suggestionId: fresh.suggestionId, email: email, decision: .choose(path))
+        try await Learning(api: api, catalog: catalog, setId: setId)
+            .send(suggestion: suggestion, action: row.action, email: email)
     }
 
     public func close() {
@@ -700,28 +575,5 @@ public final class RecommenderSession: ObservableObject {
 
     // MARK: Messages
 
-    public nonisolated static func describe(_ error: Error) -> String {
-        switch error {
-        case ServiceError.unreachable:
-            return "The local recommendation service is not responding."
-        case ServiceError.api(_, let code, let message):
-            return code == "llm_unavailable" ? "The local model is unavailable. Try again shortly." : message
-        case ServiceError.notLoopback:
-            return "Refused: the service address must be on this computer."
-        case ServiceError.badResponse:
-            return "The local service gave an unexpected answer."
-        case MailError.notAuthorized:
-            return "Mail access is not allowed. Turn it on in System Settings > Privacy & Security > Automation."
-        case MailError.mailNotRunning:
-            return "Mail is not open."
-        case MailError.timedOut:
-            return "Mail did not answer in time."
-        case MailError.notFound(let message):
-            return message
-        case MailError.script(_, let message):
-            return message
-        default:
-            return (error as? LocalizedError)?.errorDescription ?? String(describing: type(of: error))
-        }
-    }
+    public nonisolated static func describe(_ error: Error) -> String { MailAdvice.describe(error) }
 }

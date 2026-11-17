@@ -27,6 +27,19 @@ public protocol RecommenderAPI: Sendable {
 }
 
 extension RecommenderAPI {
+    /// A first request with many labels can outlast the service's model timeout. The model keeps
+    /// what it read in its prompt cache, so one retry usually answers at once. Both windows send
+    /// exactly this request for an email (specs/004-batch-recommendations, SC-006).
+    public func suggestWithRetry(
+        email: Email, setId: String, allowDelete: Bool, trash: [TrashedEmail]
+    ) async throws -> Suggestion {
+        do {
+            return try await suggest(email: email, setId: setId, allowDelete: allowDelete, trash: trash)
+        } catch ServiceError.api(status: 503, code: "llm_unavailable", _) {
+            return try await suggest(email: email, setId: setId, allowDelete: allowDelete, trash: trash)
+        }
+    }
+
     /// A suggestion that can only be a label.
     public func suggest(email: Email, setId: String) async throws -> Suggestion {
         try await suggest(email: email, setId: setId, allowDelete: false, trash: [])

@@ -100,20 +100,25 @@ A menu bar app with no third-party dependencies, in two targets:
 
 | Target | Responsibility |
 |--------|----------------|
-| `Sources/MailCore/` | No UI: label and folder mapping, syncing them to a category set per account (following labels that were moved or renamed), the HTTP client for the service, session state |
+| `Sources/MailCore/` | No UI: label and folder mapping, syncing them to a category set per account (following labels that were moved or renamed), the HTTP client for the service, and the session state: `RecommenderSession` for one email, `BatchSession` for several. Both use `LabelPicker` (the label list), `Learning` (decisions to feedback) and `MailAdvice` (what the window says) |
 | `Sources/CategoryRecommender/` | The app: menu bar item, floating window, hot key, running the Mail bridge, starting and stopping the service on demand |
 
 `Resources/mail-bridge.js` is the only code that touches Mail. It is JavaScript for Automation run through `osascript`: it reads the selected email, lists mailboxes, files an email, moves one to the Trash with Mail's own commands, and counts which mailboxes hold given emails. Input is passed as data, never spliced into a script.
 
 The app is a client of the service's HTTP API and holds no learned data of its own.
 
-Mail does not report that a label was moved or renamed: the old label is gone and a new one appears. Each sync pairs them on evidence (same name in a new place, a renamed parent's children, or the new label holding emails learned for the old one) and renames or moves the category in place, so its learning stays. Design: the Sync section of the plan. Design: [`specs/002-mail-app-integration/plan.md`](../specs/002-mail-app-integration/plan.md).
+Mail does not report that a label was moved or renamed: the old label is gone and a new one appears. Each sync pairs them on evidence (same name in a new place, a renamed parent's children, or the new label holding emails learned for the old one) and renames or moves the category in place, so its learning stays. Design: the Sync section of [`specs/002-mail-app-integration/plan.md`](../specs/002-mail-app-integration/plan.md).
+
+### Several emails at once
+
+With more than one email selected, the window lists them and recommends for each separately, through the same `POST /v1/suggestions`, one request at a time. The bridge opens a batch with each email's sender and subject only, so the list appears at once, and reads the emails' text five at a time in the background. The Trash is read once for every sender in the batch. Labelling acts on each email by its id. Mail's Archive and Delete act on Mail's selection, so the bridge first selects exactly the emails of the owner's action, reads the selection back, and clicks the command only if it matches. Each decision is learned for its own email. Design: [`specs/004-batch-recommendations/plan.md`](../specs/004-batch-recommendations/plan.md), and the bridge's batch commands in [`specs/004-batch-recommendations/contracts/mail-bridge.md`](../specs/004-batch-recommendations/contracts/mail-bridge.md).
 
 ## Data
 
 | Data | Where | Kept |
 |------|-------|------|
 | Email being classified | Service memory | Until the suggestion is answered or expires |
+| Emails of a batch (up to 50) | Mail app memory | While the window is open, or until their decision is learned |
 | Learning examples: sender, subject, snippet, embedding, category | SQLite in the data directory | Until the owner deletes them |
 | Categories and category sets | SQLite | Until the owner deletes them |
 | Decisions (no content) | SQLite | See the retention table in the data model |

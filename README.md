@@ -7,7 +7,7 @@ Nothing leaves your computer: there are no cloud APIs, no telemetry, and the onl
 You can use it in two ways:
 
 - **Web UI** at `http://127.0.0.1:8080/`: paste an email, get a suggestion, confirm or correct it.
-- **macOS Mail**: a menu bar app that recommends a label or folder for the selected email and files it in two actions (a shortcut, then Return).
+- **macOS Mail**: a menu bar app that recommends a label or folder for the selected email and files it in two actions (a shortcut, then Return). Select several emails to get a recommendation for each, and approve them all at once or one by one.
 
 ## Requirements
 
@@ -72,6 +72,8 @@ To use the smaller, faster model, start with `--llm-file qwen3-4b-instruct-q4_k_
 1. Select an email in Mail.
 2. Press **Control-Option-L**, or click the tag icon in the menu bar.
 3. Press **Return** to file it under the recommended label, or pick another one.
+
+With several emails selected, each one gets its own recommendation in a list. Press **Command-Return** to approve every recommendation that is ready, or go through the rows and decide each one: **Return** accepts, typing picks another label, **Command-Delete** moves to the Trash. Emails you don't decide on are left as they are.
 
 The app starts the service by itself and stops it after 30 minutes without use, so you don't need `run-local.sh`. It works with Gmail labels and with folders of iCloud, Exchange and other accounts. All keys and options are in [`mail-app/README.md`](mail-app/README.md#use).
 

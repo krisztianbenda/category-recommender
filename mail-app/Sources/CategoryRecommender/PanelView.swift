@@ -3,6 +3,18 @@
 import MailCore
 import SwiftUI
 
+/// A problem the owner should read, at the bottom of either window.
+struct NoticeText: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.red)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 struct PanelView: View {
     @ObservedObject var session: RecommenderSession
 
@@ -146,12 +158,7 @@ private struct ReadyView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let notice = session.notice {
-                Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            if let notice = session.notice { NoticeText(text: notice) }
             if !session.orphaned.isEmpty {
                 HStack {
                     Text(orphanText)
