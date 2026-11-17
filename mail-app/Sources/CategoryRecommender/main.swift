@@ -212,6 +212,29 @@ func driveBatch(batch: BatchSession, controller: PanelController, mail: DemoMail
         let ids = batch.rows.filter { row in filed.contains(row.placement?.id ?? -1) }.compactMap(\.ref.messageId)
         return Set(ids + mail.movedToTrash.flatMap { $0 })
     }
+    /// The text field that has the window's keyboard, if any. The window must be the key window
+    /// for typing to reach it, which it cannot be while the screen is locked.
+    func editing() -> NSTextView? {
+        guard let window = NSApp.window(withWindowNumber: controller.windowNumber), window.isKeyWindow else {
+            return nil
+        }
+        return window.firstResponder as? NSTextView
+    }
+    /// Waits until a text field other than `previous` has the keyboard, holding `text` with the
+    /// caret after it, as a person sees it before typing on. A field takes the focus a moment after
+    /// it appears, which on a slow machine is longer than a key press settles.
+    func fieldReady(with text: String, replacing previous: AnyObject? = nil) async -> Bool {
+        for _ in 0..<60 {
+            if let editor = editing(), editor.string == text,
+                editor.selectedRange() == NSRange(location: (text as NSString).length, length: 0),
+                previous == nil || (editor.delegate as AnyObject?) !== previous
+            {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return false
+    }
     var report: [String: Bool] = [:]
     let ids = batch.rows.map(\.id)
     let messageIds = batch.rows.compactMap(\.ref.messageId)
@@ -232,13 +255,16 @@ func driveBatch(batch: BatchSession, controller: PanelController, mail: DemoMail
     await press(125, "\u{F701}")
     await press(5, "g")
     report["typingOpensChooseALabel"] = batch.pickerScope == [ids[1]] && batch.pickerQuery == "g"
+    report["theSearchTakesTheKeyboard"] = await fieldReady(with: "g")
     await press(0, "a")
     report["typingAddsToTheSearch"] = batch.pickerQuery == "ga"
 
     // Command-N opens New label with the search as its name, to finish; Up and Down choose where
     // it goes.
+    let search = editing()?.delegate as AnyObject?
     await press(45, "n", .command)
     report["commandNOpensNewLabel"] = batch.newLabel == NewLabelForm(name: "ga")
+    report["theNameTakesTheKeyboard"] = await fieldReady(with: "ga", replacing: search)
     await press(7, "x")
     report["typingFinishesTheNewLabelName"] = batch.newLabel?.name == "gax"
     await press(125, "\u{F701}")
