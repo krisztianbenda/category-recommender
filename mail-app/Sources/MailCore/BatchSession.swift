@@ -37,7 +37,9 @@ public struct BatchRow: Identifiable, Equatable, Sendable {
     var read = false
     var decided = false
 
-    public var id: String { ref.messageId.map { "m:\($0)" } ?? "r:\(ref.account)/\(ref.mailbox)/\(ref.id)" }
+    /// The Message-ID, if Mail has one: the bridge reports a missing one as "".
+    public var messageId: String? { ref.messageId.flatMap { $0.isEmpty ? nil : $0 } }
+    public var id: String { messageId.map { "m:\($0)" } ?? "r:\(ref.account)/\(ref.mailbox)/\(ref.id)" }
     public var subject: String { email?.subject ?? ref.subject ?? "" }
     public var sender: String { email?.from ?? ref.from ?? "" }
     public var suggestion: Suggestion? {
@@ -131,10 +133,16 @@ public final class BatchSession: ObservableObject {
     /// Labels created in Mail during this batch, by path key (FR-019).
     private var createdKeys = Set<String>()
     /// New categories already taught to the service during this batch, by path key (research R5).
+    /// A key is added once the service has learned it, not when Mail filed the email.
     private var taughtKeys = Set<String>()
-    /// Rows applied before their recommendation, with what to learn once it arrives.
-    private var waitingToLearn: [String: (action: RowAction, alreadyAdded: Bool)] = [:]
+    /// Rows applied before their recommendation, with what to learn once it arrives: the action, and
+    /// the path key of the label it filed under.
+    private var waitingToLearn: [String: (action: RowAction, key: String?)] = [:]
     private var learning: [Task<Void, Never>] = []
+    /// Learning runs one email at a time, in the order the emails were applied, so that the first
+    /// email to name a new category teaches it before the others are taught it exists.
+    private var lastLearning: Task<Void, Never>?
+    private var recommending = false
 
     public init(mail: MailSource, api: RecommenderAPI, backend: BackendControl, keepInInbox: Bool = false) {
         self.mail = mail
@@ -168,9 +176,11 @@ public final class BatchSession: ObservableObject {
         self.account = account
         usesFolders = account.kind == .folders
         viewed = opening.viewed ?? []
-        rows = selection.messages.map { BatchRow(ref: $0) }
+        // The same email can be selected twice, as copies in two mailboxes: it is one row.
+        var seen = Set<String>()
+        rows = selection.messages.map { BatchRow(ref: $0) }.filter { seen.insert($0.id).inserted }
         highlightedID = rows.first?.id
-        leftOut = max(0, selection.total - rows.count)
+        leftOut = max(0, selection.total - selection.messages.count)
         do {
             if let given = opening.labels { labels = given } else { labels = try await mail.labels(account: account.name) }
         } catch {
@@ -218,8 +228,12 @@ public final class BatchSession: ObservableObject {
         let refs = ids.compactMap { id in rows.first { $0.id == id }?.ref }
         do {
             let items = try await mail.read(refs, viewed: viewed, account: account)
-            for (id, ref) in zip(ids, refs) {
-                let item = items.first { $0.messageId == ref.messageId && ref.messageId != nil }
+            // The bridge answers in the order asked; match by position, so that emails without a
+            // Message-ID are found too.
+            let inOrder = items.count == refs.count
+            for (index, (id, ref)) in zip(ids, refs).enumerated() {
+                let item =
+                    inOrder ? items[index] : items.first { $0.messageId == ref.messageId && ref.messageId != nil }
                 update(id) { row in
                     row.read = true
                     if let item, item.found, let placement = item.placement, let email = item.email {
@@ -259,14 +273,14 @@ public final class BatchSession: ObservableObject {
     private func lookUpTrash() -> Task<TrashLookups?, Never> {
         guard let account else { return Task { nil } }
         let senders = Array(Set(rows.compactMap { $0.ref.from })).sorted()
-        let ids = rows.compactMap(\.ref.messageId)
+        let ids = rows.compactMap(\.messageId)
         let mail = self.mail
         return Task { [weak self] in
             let lookup = try? await mail.trashSimilar(senders: senders, messageIds: ids, account: account.name)
             guard let self else { return lookup }
             self.trashFound = lookup?.found == true
             let inTrash = Set(lookup?.inTrashIds ?? [])
-            for row in self.rows where row.ref.messageId.map(inTrash.contains) == true {
+            for row in self.rows where row.messageId.map(inTrash.contains) == true {
                 self.update(row.id) { $0.inTrash = true }
             }
             for row in self.rows where row.suggestion != nil { self.plan(row.id) }
@@ -277,7 +291,7 @@ public final class BatchSession: ObservableObject {
     /// Move to Trash is possible for this row: the account has a Trash, Mail identifies the email,
     /// and it is not in the Trash already.
     public func canTrash(_ row: BatchRow) -> Bool {
-        trashFound && !row.inTrash && row.ref.messageId != nil
+        trashFound && !row.inTrash && row.messageId != nil
     }
 
     // MARK: Recommendations
@@ -304,6 +318,12 @@ public final class BatchSession: ObservableObject {
             }
             return
         }
+        await recommendRemaining()
+    }
+
+    private func recommendRemaining() async {
+        recommending = true
+        defer { recommending = false }
         while let id = nextToRecommend() {
             await recommend(id)
         }
@@ -349,7 +369,7 @@ public final class BatchSession: ObservableObject {
             }
             plan(id)
             if let waiting = waitingToLearn.removeValue(forKey: id) {
-                learn(id, action: waiting.action, alreadyAdded: waiting.alreadyAdded)
+                learn(id, action: waiting.action, key: waiting.key)
             }
         } catch {
             update(id) {
@@ -419,7 +439,8 @@ public final class BatchSession: ObservableObject {
     /// Applies every ready, unskipped recommendation (FR-010). Waiting rows are not affected.
     @discardableResult
     public func approveAll() -> Task<Void, Never>? {
-        submit(approvable.compactMap { row in row.recommended.map { BatchItem(rowID: row.id, action: $0.action) } })
+        notice = nil
+        return submit(approvable.compactMap { row in row.recommended.map { BatchItem(rowID: row.id, action: $0.action) } })
     }
 
     /// Accepts the recommendations of the scope. Rows without one are left as they are.
@@ -438,6 +459,9 @@ public final class BatchSession: ObservableObject {
     @discardableResult
     public func applyToScope(_ action: RowAction, scope ids: [String]? = nil) -> Task<Void, Never>? {
         let ids = ids ?? scope
+        // A new action replaces what the window said about the last one; otherwise it stays and
+        // keeps the window from closing by itself once every email is done.
+        notice = nil
         if action == .trash {
             let open = ids.compactMap { id in rows.first { $0.id == id } }
             let refused = open.filter { !canTrash($0) }
@@ -510,7 +534,7 @@ public final class BatchSession: ObservableObject {
                 live.append(item)
             }
         }
-        var applied: [(item: BatchItem, alreadyAdded: Bool)] = []
+        var applied: [(item: BatchItem, key: String?)] = []
 
         // File, one call per target label, creating each new label once (FR-019).
         let filing = live.filter { $0.action != .trash }
@@ -536,10 +560,7 @@ public final class BatchSession: ObservableObject {
                 continue
             }
             for item in target.items {
-                // The first email to name a new category teaches it; the others learn it as it
-                // exists by then (research R5).
-                applied.append((item, taughtKeys.contains(key)))
-                if Self.teachesNew(item.action) { taughtKeys.insert(key) }
+                applied.append((item, key))
                 update(item.rowID) { $0.outcome = "Filed in \(LabelText.segments(target.mailbox).joined(separator: "/"))" }
                 if account.kind == .gmail, mode(for: item.rowID) == .move { archive.append(item.rowID) }
             }
@@ -549,13 +570,13 @@ public final class BatchSession: ObservableObject {
         // Move to the Trash, in one call.
         let trashing = live.filter { $0.action == .trash }
         if !trashing.isEmpty {
-            for item in await moveToTrash(trashing, account: account.name) { applied.append((item, false)) }
+            for item in await moveToTrash(trashing, account: account.name) { applied.append((item, nil)) }
         }
 
         backend.noteActivity()
-        for (item, alreadyAdded) in applied {
+        for (item, key) in applied {
             update(item.rowID) { $0.state = .applied }
-            learn(item.rowID, action: item.action, alreadyAdded: alreadyAdded)
+            learn(item.rowID, action: item.action, key: key)
         }
         onEvent?(
             "batch_action",
@@ -606,6 +627,7 @@ public final class BatchSession: ObservableObject {
             }
             try await mail.createLabel(mailbox, account: account)
             createdKeys.insert(key)
+            addToCatalog(mailbox)
             try await mail.file(fileItems, into: mailbox, account: account)
         }
     }
@@ -617,7 +639,7 @@ public final class BatchSession: ObservableObject {
     }
 
     private func selected(_ id: String) -> SelectedEmail? {
-        guard let row = rows.first(where: { $0.id == id }), let messageId = row.ref.messageId else { return nil }
+        guard let row = rows.first(where: { $0.id == id }), let messageId = row.messageId else { return nil }
         return SelectedEmail(
             messageId: messageId, view: MessageLocation(id: row.ref.id, mailbox: row.ref.mailbox),
             placement: row.placement.map { MessageLocation(id: $0.id, mailbox: $0.mailbox) })
@@ -639,7 +661,7 @@ public final class BatchSession: ObservableObject {
         }
         guard let advice = MailAdvice.batchArchive(outcome.result, selectErrors: outcome.selectErrors) else { return }
         let left = Set(outcome.left ?? emails.map(\.messageId))
-        for id in ids where rows.first(where: { $0.id == id })?.ref.messageId.map(left.contains) == true {
+        for id in ids where rows.first(where: { $0.id == id })?.messageId.map(left.contains) == true {
             update(id) { $0.notice = advice }
         }
         if outcome.result == .notAllowed || outcome.result == .systemEventsNotAllowed { notice = advice }
@@ -675,7 +697,7 @@ public final class BatchSession: ObservableObject {
             let left = Set(outcome.left ?? emails.map(\.messageId))
             var arrived: [BatchItem] = []
             for item in ready {
-                if rows.first(where: { $0.id == item.rowID })?.ref.messageId.map(left.contains) == true {
+                if rows.first(where: { $0.id == item.rowID })?.messageId.map(left.contains) == true {
                     fail(item.rowID, MailAdvice.trash(.notInTrash)!)
                 } else {
                     update(item.rowID) { $0.outcome = "Moved to the Trash" }
@@ -707,7 +729,9 @@ public final class BatchSession: ObservableObject {
     // MARK: Learning
 
     /// Learns from the row now if its recommendation exists, else when it arrives (FR-022).
-    private func learn(_ id: String, action: RowAction, alreadyAdded: Bool) {
+    /// `key`: the path key of the label the email was filed under. The first email to name a new
+    /// category teaches it; the others learn it as it exists by then (research R5).
+    private func learn(_ id: String, action: RowAction, key: String?) {
         guard let row = rows.first(where: { $0.id == id }) else { return }
         switch row.recommendation {
         case .ready(let suggestion):
@@ -716,20 +740,33 @@ public final class BatchSession: ObservableObject {
                 guard let self else { throw CancellationError() }
                 return try await self.gate.run { try await self.api.suggest(email: email, setId: setId) }
             }
+            let before = lastLearning
             let task = Task { [weak self] in
+                await before?.value
+                let alreadyAdded = key.map { self?.taughtKeys.contains($0) == true } ?? false
                 do {
                     try await teacher.send(suggestion: suggestion, action: action, email: email, alreadyAdded: alreadyAdded)
+                    if let key, Self.teachesNew(action) { self?.taughtKeys.insert(key) }
                     self?.done(id)
                 } catch {
                     self?.done(id, notice: "Not learned: \(MailAdvice.describe(error))")
                 }
             }
+            lastLearning = task
             learning.append(task)
         case .unavailable:
             done(id)
         case .none, .thinking, .startingModel:
-            waitingToLearn[id] = (action, alreadyAdded)
+            waitingToLearn[id] = (action, key)
+            // After closing, the recommendations may have stopped before this email was applied.
+            if closed { resumeRecommending() }
         }
+    }
+
+    /// Makes the recommendations still needed for learning, if nothing is making them now.
+    private func resumeRecommending() {
+        guard !recommending, setId != nil else { return }
+        worker = Task { await self.recommendRemaining() }
     }
 
     /// A decided row whose recommendation will not come: done, with nothing learned.
@@ -780,8 +817,12 @@ public final class BatchSession: ObservableObject {
         guard !closed else { return finish() }
         closed = true
         onEvent?("batch_closed", ["undecided": rows.filter { !$0.decided }.count])
-        if waitingToLearn.isEmpty { worker?.cancel() }
-        for task in reads where waitingToLearn.isEmpty { task.cancel() }
+        // Rows still running in Mail will want their recommendation too, to learn from it.
+        let stillNeeded = !waitingToLearn.isEmpty || rows.contains { $0.state == .applying }
+        if !stillNeeded {
+            worker?.cancel()
+            for task in reads { task.cancel() }
+        }
         finish()
     }
 
