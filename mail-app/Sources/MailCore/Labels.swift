@@ -183,6 +183,13 @@ public struct LabelCatalog: Equatable, Sendable {
         return entries.first { $0.key == key }
     }
 
+    /// The label a new mailbox would duplicate: the same mailbox whatever its case, or the same
+    /// category once the service folds case and accents. Nil when it would be new.
+    public func existing(forNewMailbox mailbox: String) -> LabelEntry? {
+        entries.first { $0.mailbox.caseInsensitiveCompare(mailbox) == .orderedSame }
+            ?? newCategory(forMailbox: mailbox).flatMap { entry(forPath: $0.category.path) }
+    }
+
     /// A folder inside the Inbox is a top-level category named after its whole path.
     private static func inboxFolderName(_ parts: [String]) -> String {
         parts.joined(separator: LabelText.deepSeparator)
