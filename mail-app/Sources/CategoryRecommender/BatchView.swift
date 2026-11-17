@@ -310,8 +310,7 @@ private struct BatchPicker: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Search \(session.noun)s, or name a new one", text: $session.pickerQuery)
                         .textFieldStyle(.plain)
-                        .focused($searchFocused)
-                        .onAppear { searchFocused = true }
+                        .modifier(FocusAtEnd(focus: $searchFocused))
                     Button {
                         session.openNewLabel()
                     } label: {
@@ -348,7 +347,10 @@ private struct BatchPicker: View {
     }
 
     private var keys: String {
-        if session.newLabel != nil { return "\u{2191}\u{2193} location   \u{23CE} create   esc back" }
+        if session.newLabel != nil {
+            let enter = session.newLabelOutcome.isExisting ? "file" : "create"
+            return "\u{2191}\u{2193} location   \u{23CE} \(enter)   esc back"
+        }
         return "\u{23CE} file   \u{2318}N new \(session.noun)   \u{2318}\u{232B} trash   esc back"
     }
 
@@ -358,12 +360,38 @@ private struct BatchPicker: View {
     }
 }
 
+/// Focuses a field when it appears, with the caret after its text. macOS selects all of a field's
+/// text when it takes focus, so the next key would replace what was typed before it opened.
+private struct FocusAtEnd: ViewModifier {
+    let focus: FocusState<Bool>.Binding
+    /// Only the first focus: a later click places the caret where the owner clicked.
+    @State private var placed = false
+
+    func body(content: Content) -> some View {
+        content
+            .focused(focus)
+            // On the next turn: when this field replaces the focused one, the focus would
+            // otherwise go with the field that is leaving.
+            .onAppear { DispatchQueue.main.async { focus.wrappedValue = true } }
+            .onChange(of: focus.wrappedValue) { _, isFocused in
+                guard isFocused, !placed else { return }
+                placed = true
+                DispatchQueue.main.async {
+                    guard let editor = NSApp.windows.first(where: \.isKeyWindow)?.firstResponder as? NSTextView
+                    else { return }
+                    editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+                }
+            }
+    }
+}
+
 /// New label…: a name and where it goes, the top level or inside a label, as in Mail's New Mailbox.
 private struct NewLabelPane: View {
     @ObservedObject var session: BatchSession
     @FocusState private var nameFocused: Bool
 
     var body: some View {
+        let outcome = session.newLabelOutcome
         VStack(alignment: .leading, spacing: 14) {
             Text("New \(session.noun)").font(.title3.weight(.semibold))
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 12) {
@@ -372,7 +400,7 @@ private struct NewLabelPane: View {
                     TextField("Name", text: name, prompt: Text("For example, Lisbon"))
                         .labelsHidden()
                         .textFieldStyle(.roundedBorder)
-                        .focused($nameFocused)
+                        .modifier(FocusAtEnd(focus: $nameFocused))
                 }
                 GridRow {
                     Text("Location:")
@@ -386,25 +414,23 @@ private struct NewLabelPane: View {
                     .labelsHidden()
                 }
             }
-            Text(outcome)
+            Text(message(outcome))
                 .font(.callout)
-                .foregroundStyle(
-                    session.newLabelOutcome.isReserved ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
+                .foregroundStyle(outcome.isReserved ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
                 Button("Back") { session.cancelNewLabel() }
-                Button(session.newLabelOutcome.isExisting ? "File Under It" : "Create and File") {
+                Button(outcome.isExisting ? "File Under It" : "Create and File") {
                     session.createNewLabel()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(session.newLabelOutcome.action == nil)
+                .disabled(outcome.action == nil)
             }
             Spacer(minLength: 0)
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear { nameFocused = true }
     }
 
     private var name: Binding<String> {
@@ -420,9 +446,9 @@ private struct NewLabelPane: View {
         return count == 1 ? "this email" : "the \(count) emails"
     }
 
-    private var outcome: String {
+    private func message(_ outcome: NewLabelOutcome) -> String {
         let noun = session.noun
-        switch session.newLabelOutcome {
+        switch outcome {
         case .empty:
             return "Name the \(noun), choose where it goes, and \(emails) will be filed under it."
         case .create(let mailbox):

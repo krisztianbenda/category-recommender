@@ -55,6 +55,15 @@ struct NewLabelTests {
         #expect(NewLabelForm(name: "Gesendet", parent: "Projects").outcome(in: folders) == .create("Projects/Gesendet"))
     }
 
+    @Test func aFolderInsideTheInboxCanHoldANewOne() {
+        // iCloud and other folder accounts name their Inbox "INBOX"; its folders are the owner's.
+        let folders = LabelCatalog(mailboxes: ["INBOX", "INBOX/Receipts", "Bills"], inbox: "INBOX")
+        let receipts = folders.entries.first { $0.mailbox == "INBOX/Receipts" }!
+        #expect(
+            NewLabelForm(name: "2026", parent: receipts.mailbox).outcome(in: folders) == .create("INBOX/Receipts/2026"))
+        #expect(NewLabelForm(name: "INBOX/Other").outcome(in: folders).isReserved)
+    }
+
     @Test func startsFromWhatWasTypedInTheSearch() {
         #expect(NewLabelForm.from(query: "", catalog: catalog) == NewLabelForm())
         #expect(NewLabelForm.from(query: " Lisbon ", catalog: catalog) == NewLabelForm(name: "Lisbon"))
@@ -66,5 +75,33 @@ struct NewLabelTests {
                 == NewLabelForm(name: "B", parent: "Work/Clients/Acme"))
         // A parent that is not a label stays in the name, and is created with it.
         #expect(NewLabelForm.from(query: "Hobbies/Chess", catalog: catalog) == NewLabelForm(name: "Hobbies/Chess"))
+        #expect(NewLabelForm.from(query: "Hobbies/", catalog: catalog) == NewLabelForm(name: "Hobbies/"))
+    }
+
+    @Test func aSearchEndingInASlashStartsANameInsideThatLabel() {
+        #expect(NewLabelForm.from(query: "Travelling/", catalog: catalog) == NewLabelForm(parent: "Travelling"))
+        #expect(NewLabelForm.from(query: "Travelling / ", catalog: catalog) == NewLabelForm(parent: "Travelling"))
+    }
+
+    @Test func theParentInTheSearchIsFoundAsTheServiceWouldFindIt() {
+        // An accent or case typo is still the existing label, not a second, look-alike one.
+        #expect(
+            NewLabelForm.from(query: "Trav\u{E9}lling/Porto", catalog: catalog)
+                == NewLabelForm(name: "Porto", parent: "Travelling"))
+        // A deep label by the path the window shows for it.
+        #expect(
+            NewLabelForm.from(query: "Work/Clients \u{203A} Acme/B", catalog: catalog)
+                == NewLabelForm(name: "B", parent: "Work/Clients/Acme"))
+    }
+
+    @Test func typingInTheSearchOffersCreateOnlyForWhatIsNew() {
+        func offersCreate(_ query: String) -> Bool {
+            LabelPicker.rows(catalog: catalog, suggestion: nil, canTrash: false, query: query)
+                .contains { $0.section == .create }
+        }
+        #expect(offersCreate("Travelling/Porto"))
+        #expect(!offersCreate("travelling"))
+        // The same category as an existing deep label once accents are folded.
+        #expect(!offersCreate("Work/Clients/Acm\u{E9}"))
     }
 }

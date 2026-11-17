@@ -67,7 +67,7 @@ Deleting a label is not offered here (spec, Assumptions).
 
 Opened with **New label…** next to the search, or Command-N. It takes the place of the search and the list, like Mail's own New Mailbox (FR-011):
 
-- **Name**: starts as the search. "Trips/Lis" starts as "Lis" inside Trips when Trips is a label.
+- **Name**: starts as the search, with the caret after it. "Trips/Lis" starts as "Lis" inside Trips when Trips is a label, found as the service would find it (case and accents folded), and "Trips/" starts an empty name inside Trips.
 - **Location**: **Top level**, or any label, to make a sub-label of it. A label deeper than two levels sits in the recommender as `Work/Clients › Acme`, as when it is made in Mail.
 - Below them, what Return will do: "Creates “Trips/Lisbon” and files the 3 emails under it." If a label of that name is there already, with case and accents folded as the service does, it files under that one instead of making a second. One of the account's own mailboxes, such as Inbox, is refused.
 

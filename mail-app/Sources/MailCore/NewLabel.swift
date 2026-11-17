@@ -14,16 +14,16 @@ public struct NewLabelForm: Equatable, Sendable {
     }
 
     /// Starts from what was typed in the search. "Trips/Lis" puts "Lis" inside Trips when Trips is
-    /// a label, so the owner only has to finish the name.
+    /// a label, so the owner only has to finish the name, and "Trips/" starts an empty name there.
     public static func from(query: String, catalog: LabelCatalog) -> NewLabelForm {
-        let parts = LabelText.segments(query)
-        guard parts.count > 1 else { return NewLabelForm(name: parts.first ?? "") }
-        let parentMailbox = parts.dropLast().joined(separator: "/")
-        let parent = catalog.entries.first {
-            $0.mailbox.caseInsensitiveCompare(parentMailbox) == .orderedSame
+        var parts = LabelText.segments(query)
+        let name = query.trimmingCharacters(in: .whitespaces).hasSuffix("/") ? "" : parts.popLast() ?? ""
+        guard !parts.isEmpty else { return NewLabelForm(name: name) }
+        // Found as the service would find it, so "trips" or "Tríps" is still Trips.
+        guard let parent = catalog.existing(forNewMailbox: parts.joined(separator: "/")) else {
+            return NewLabelForm(name: (parts + [name]).joined(separator: "/"))
         }
-        guard let parent else { return NewLabelForm(name: parts.joined(separator: "/")) }
-        return NewLabelForm(name: parts.last!, parent: parent.mailbox)
+        return NewLabelForm(name: name, parent: parent.mailbox)
     }
 
     /// The mailbox it would create. Nil while the name is empty.
@@ -36,14 +36,10 @@ public struct NewLabelForm: Equatable, Sendable {
 
     public func outcome(in catalog: LabelCatalog) -> NewLabelOutcome {
         guard let mailbox else { return .empty }
-        if LabelText.cleanTyped(mailbox) == nil || catalog.isAccountFolder(mailbox) {
-            return .reserved(mailbox)
-        }
-        // The service folds case and accents, so "trips" is the same category as "Trips".
-        let same =
-            catalog.entries.first { $0.mailbox.caseInsensitiveCompare(mailbox) == .orderedSame }
-            ?? catalog.newCategory(forMailbox: mailbox).flatMap { catalog.entry(forPath: $0.category.path) }
-        if let same { return .exists(same) }
+        // Inside one of the owner's labels, such as a folder in the Inbox, any name is theirs.
+        let ownsName = parent != nil || LabelText.cleanTyped(mailbox) != nil
+        if !ownsName || catalog.isAccountFolder(mailbox) { return .reserved(mailbox) }
+        if let same = catalog.existing(forNewMailbox: mailbox) { return .exists(same) }
         return .create(mailbox)
     }
 }
