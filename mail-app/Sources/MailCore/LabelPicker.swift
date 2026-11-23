@@ -23,9 +23,8 @@ public enum LabelPicker {
             out = catalog.entries
                 .filter { LabelText.normalise($0.path).contains(search) }
                 .map { row($0, .all) }
-            if let typed = LabelText.cleanTyped(query), catalog.entry(forPath: typed) == nil,
-                !catalog.isAccountFolder(typed),
-                !catalog.entries.contains(where: { $0.mailbox.caseInsensitiveCompare(typed) == .orderedSame })
+            if let typed = LabelText.cleanTyped(query), catalog.existing(forNewMailbox: typed) == nil,
+                !catalog.isAccountFolder(typed)
             {
                 out.append(
                     LabelRow(id: "create:\(typed)", title: typed, action: .createTyped(typed), section: .create))

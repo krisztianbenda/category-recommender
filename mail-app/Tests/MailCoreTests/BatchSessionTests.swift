@@ -406,6 +406,88 @@ struct BatchSessionTests {
         #expect(feedback("S2-fresh1") == .choose("Family/Weekends"))
     }
 
+    // MARK: New label
+
+    @Test func aNewSubLabelIsCreatedInsideTheChosenLabelAndFilesTheMarkedRows() async {
+        suggest(Self.lunch, "S1", "Gadgets")
+        suggest(Self.baby, "S2", "Gadgets")
+        let s = await started([Self.lunch, Self.baby])
+        s.toggleMarkAll()
+        s.openPicker()
+        s.openNewLabel()
+        #expect(s.newLabel == NewLabelForm())
+        s.newLabel?.name = "Weekends"
+        s.moveNewLabelParent(by: 1)
+        #expect(s.newLabel?.parent == "Family")
+        #expect(s.newLabelOutcome == .create("Family/Weekends"))
+        await run(s.createNewLabel(), s)
+        #expect(s.pickerScope == nil && s.newLabel == nil)
+        #expect(mail.created == ["Family/Weekends"])
+        #expect(mail.filed.count == 1 && mail.filed[0].target == "Family/Weekends")
+        #expect(mail.filed.first?.items.count == 2)
+        #expect(feedback("S1") == .acceptNew(NewCategory(parent: "Family", name: "Weekends")))
+        #expect(feedback("S2-fresh1") == .choose("Family/Weekends"))
+    }
+
+    @Test func aNewTopLevelLabelStartsFromTheSearchAndFilesTheHighlightedRow() async {
+        suggest(Self.porto, "S1", "Gadgets")
+        let s = await started([Self.porto, Self.lunch])
+        s.openPicker(query: "Trips")
+        s.openNewLabel()
+        #expect(s.newLabel == NewLabelForm(name: "Trips"))
+        await run(s.createNewLabel(), s)
+        #expect(mail.created == ["Trips"])
+        #expect(mail.filed.map(\.target) == ["Trips"])
+        #expect(mail.touched == ["m1"])
+        #expect(feedback("S1") == .acceptNew(NewCategory(parent: nil, name: "Trips")))
+    }
+
+    @Test func namingALabelThatExistsFilesUnderItWithoutCreatingIt() async {
+        suggest(Self.baby, "S1", "Gadgets")
+        let s = await started([Self.baby, Self.lunch])
+        s.openPicker()
+        s.openNewLabel()
+        s.newLabel = NewLabelForm(name: "baby", parent: "Family")
+        #expect(s.newLabelOutcome.isExisting)
+        await run(s.createNewLabel(), s)
+        #expect(mail.created.isEmpty)
+        #expect(mail.filed.map(\.target) == ["Family/Baby"])
+        #expect(feedback("S1") == .choose("Family/Baby"))
+    }
+
+    @Test func nothingIsCreatedUntilTheNameCanBeALabel() async {
+        let s = await started([Self.lunch, Self.baby])
+        s.openPicker()
+        s.openNewLabel()
+        #expect(s.createNewLabel() == nil)
+        s.newLabel?.name = "Inbox"
+        #expect(s.newLabelOutcome == .reserved("Inbox"))
+        #expect(s.createNewLabel() == nil)
+        #expect(s.newLabel != nil && s.pickerScope == [id(1)])
+        #expect(mail.created.isEmpty && mail.filed.isEmpty)
+    }
+
+    @Test func leavingNewLabelGoesBackToTheSearchAsItWas() async {
+        let s = await started([Self.lunch, Self.baby])
+        s.openNewLabel()
+        #expect(s.newLabel == nil)  // only from Choose a label
+        s.openPicker(query: "Fam")
+        s.openNewLabel()
+        s.moveNewLabelParent(by: -1)
+        #expect(s.newLabel?.parent == nil)
+        s.moveNewLabelParent(by: 99)
+        #expect(s.newLabel?.parent == "Gadgets")
+        s.moveNewLabelParent(by: -3)
+        #expect(s.newLabel?.parent == nil)
+        s.cancelNewLabel()
+        #expect(s.newLabel == nil)
+        #expect(s.pickerQuery == "Fam" && s.pickerScope == [id(1)])
+        s.openNewLabel()
+        s.closePicker()
+        #expect(s.newLabel == nil)
+        #expect(mail.created.isEmpty && mail.filed.isEmpty)
+    }
+
     @Test func markedRowsGoToTheTrashOnlyAfterConfirming() async {
         mail.trashLookups2 = TrashLookups(found: true)
         let s = await started([Self.lunch, Self.baby, Self.porto])

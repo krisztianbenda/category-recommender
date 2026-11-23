@@ -58,6 +58,7 @@ Every action works on the **marked** rows, or on the highlighted row when none i
 | File a row under another label | Press **→** or start typing, pick the label, and press **Return**. **Esc** goes back |
 | Mark rows | Press **Space** on each, or **Command-A** for all. **Return** then accepts the marked rows' own recommendations |
 | File marked rows under one label | Mark them, press **→**, pick the label, and press **Return** |
+| File under a label you don't have yet | Press **→**, then **Command-N** or click **New label…**. Type the name, choose its **Location**: **Top level**, or inside one of your labels to make a sub-label. **↑** and **↓** change the location. Press **Return** to create it and file the email. If a label of that name is there already, it files under that one instead |
 | Move to the Trash | **Command-Delete**. For more than one email, the window asks first |
 | Leave a row out of Approve all | Press **Delete** to skip it, again to undo |
 | Close | Press **Esc**. Emails you didn't decide on are left as they are |

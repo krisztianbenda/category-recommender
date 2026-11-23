@@ -303,42 +303,161 @@ private struct BatchPicker: View {
             .padding(.top, 30)
             .padding(.bottom, 10)
             Divider()
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search \(session.noun)s, or name a new one", text: $session.pickerQuery)
-                    .textFieldStyle(.plain)
-                    .focused($searchFocused)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            Divider()
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(session.pickerRows) { row in
-                            PickerRow(session: session, row: row).id(row.id)
-                        }
+            if session.newLabel != nil {
+                NewLabelPane(session: session)
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search \(session.noun)s, or name a new one", text: $session.pickerQuery)
+                        .textFieldStyle(.plain)
+                        .modifier(FocusAtEnd(focus: $searchFocused))
+                    Button {
+                        session.openNewLabel()
+                    } label: {
+                        Label("New \(session.noun)\u{2026}", systemImage: "plus")
                     }
-                    .padding(.vertical, 4)
+                    .buttonStyle(.borderless)
+                    .help("Create a \(session.noun) and choose where it goes (\u{2318}N)")
                 }
-                .onChange(of: session.pickerHighlightedID) { _, id in
-                    if let id { proxy.scrollTo(id) }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                Divider()
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(session.pickerRows) { row in
+                                PickerRow(session: session, row: row).id(row.id)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .onChange(of: session.pickerHighlightedID) { _, id in
+                        if let id { proxy.scrollTo(id) }
+                    }
                 }
             }
             Divider()
-            Text("\u{23CE} file   \u{2318}\u{232B} trash   esc back")
+            Text(keys)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
         }
-        .onAppear { searchFocused = true }
+    }
+
+    private var keys: String {
+        if session.newLabel != nil {
+            let enter = session.newLabelOutcome.isExisting ? "file" : "create"
+            return "\u{2191}\u{2193} location   \u{23CE} \(enter)   esc back"
+        }
+        return "\u{23CE} file   \u{2318}N new \(session.noun)   \u{2318}\u{232B} trash   esc back"
     }
 
     private var heading: String {
         if let row = session.pickerRow { return "For: \(row.subject.isEmpty ? "(no subject)" : row.subject)" }
         return "For \(session.pickerScope?.count ?? 0) emails"
+    }
+}
+
+/// Focuses a field when it appears, with the caret after its text. macOS selects all of a field's
+/// text when it takes focus, so the next key would replace what was typed before it opened.
+private struct FocusAtEnd: ViewModifier {
+    let focus: FocusState<Bool>.Binding
+    /// Only the first focus: a later click places the caret where the owner clicked.
+    @State private var placed = false
+
+    func body(content: Content) -> some View {
+        content
+            .focused(focus)
+            // On the next turn: when this field replaces the focused one, the focus would
+            // otherwise go with the field that is leaving.
+            .onAppear { DispatchQueue.main.async { focus.wrappedValue = true } }
+            .onChange(of: focus.wrappedValue) { _, isFocused in
+                guard isFocused, !placed else { return }
+                placed = true
+                DispatchQueue.main.async {
+                    guard let editor = NSApp.windows.first(where: \.isKeyWindow)?.firstResponder as? NSTextView
+                    else { return }
+                    editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+                }
+            }
+    }
+}
+
+/// New label…: a name and where it goes, the top level or inside a label, as in Mail's New Mailbox.
+private struct NewLabelPane: View {
+    @ObservedObject var session: BatchSession
+    @FocusState private var nameFocused: Bool
+
+    var body: some View {
+        let outcome = session.newLabelOutcome
+        VStack(alignment: .leading, spacing: 14) {
+            Text("New \(session.noun)").font(.title3.weight(.semibold))
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 12) {
+                GridRow {
+                    Text("Name:").gridColumnAlignment(.trailing)
+                    TextField("Name", text: name, prompt: Text("For example, Lisbon"))
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .modifier(FocusAtEnd(focus: $nameFocused))
+                }
+                GridRow {
+                    Text("Location:")
+                    Picker("Location", selection: parent) {
+                        Text("Top level").tag(String?.none)
+                        Divider()
+                        ForEach(session.newLabelParents) { entry in
+                            Text(entry.path).tag(String?.some(entry.mailbox))
+                        }
+                    }
+                    .labelsHidden()
+                }
+            }
+            Text(message(outcome))
+                .font(.callout)
+                .foregroundStyle(outcome.isReserved ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("Back") { session.cancelNewLabel() }
+                Button(outcome.isExisting ? "File Under It" : "Create and File") {
+                    session.createNewLabel()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(outcome.action == nil)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var name: Binding<String> {
+        Binding(get: { session.newLabel?.name ?? "" }, set: { session.newLabel?.name = $0 })
+    }
+
+    private var parent: Binding<String?> {
+        Binding(get: { session.newLabel?.parent }, set: { session.newLabel?.parent = $0 })
+    }
+
+    private var emails: String {
+        let count = session.pickerScope?.count ?? 0
+        return count == 1 ? "this email" : "the \(count) emails"
+    }
+
+    private func message(_ outcome: NewLabelOutcome) -> String {
+        let noun = session.noun
+        switch outcome {
+        case .empty:
+            return "Name the \(noun), choose where it goes, and \(emails) will be filed under it."
+        case .create(let mailbox):
+            return "Creates \u{201C}\(mailbox)\u{201D} and files \(emails) under it."
+        case .exists(let entry):
+            return "\u{201C}\(entry.path)\u{201D} exists already. Return files \(emails) under it."
+        case .reserved(let mailbox):
+            return "\u{201C}\(mailbox)\u{201D} is one of Mail's own mailboxes. Choose another name."
+        }
     }
 }
 
