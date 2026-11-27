@@ -2,7 +2,55 @@
 // the batch window, so that the same problem reads the same in both.
 import Foundation
 
+/// Where recommendations come from (spec 005, FR-011).
+public enum RecommenderPlace: Equatable, Sendable {
+    case thisMac
+    /// A recommender on the home network, by the name the owner knows it by, such as "Mac mini".
+    case named(String)
+}
+
 public enum MailAdvice {
+    /// Set once at start-up, before any window opens.
+    public static var recommender: RecommenderPlace {
+        get { testPlace ?? configured }
+        set { configured = newValue }
+    }
+    nonisolated(unsafe) private static var configured: RecommenderPlace = .thisMac
+    /// For tests: a place for one task and the tasks it starts, so tests can run side by side.
+    @TaskLocal static var testPlace: RecommenderPlace?
+
+    /// The first menu item.
+    public static var source: String {
+        switch recommender {
+        case .thisMac: return "Recommendations from this Mac"
+        case .named(let name): return "Recommendations from \(name)"
+        }
+    }
+
+    /// While the model is loading.
+    public static var starting: String {
+        switch recommender {
+        case .thisMac: return "Starting the local model. Only the first email takes a while."
+        case .named(let name): return "The recommender on \(name) is starting\u{2026}"
+        }
+    }
+
+    /// While the batch window waits for the model.
+    public static var startingShort: String {
+        switch recommender {
+        case .thisMac: return "Starting the local model\u{2026}"
+        case .named(let name): return "The recommender on \(name) is starting\u{2026}"
+        }
+    }
+
+    /// While a recommendation is being made.
+    public static var thinking: String {
+        switch recommender {
+        case .thisMac: return "Reading the email on this computer\u{2026}"
+        case .named(let name): return "Asking \(name)\u{2026}"
+        }
+    }
+
     /// What to allow so that the app can use Mail's menus. Nil when permissions are not the problem.
     public static func menu(_ problem: MenuProblem) -> String? {
         switch problem {
@@ -77,15 +125,22 @@ public enum MailAdvice {
         "If View > Organize by Conversation is on in Mail, expand the conversation or turn it off, and try again."
 
     public static func describe(_ error: Error) -> String {
+        if case .named(let name) = recommender, let text = describe(error, remote: name) { return text }
         switch error {
         case ServiceError.unreachable:
             return "The local recommendation service is not responding."
         case ServiceError.api(_, let code, let message):
             return code == "llm_unavailable" ? "The local model is unavailable. Try again shortly." : message
-        case ServiceError.notLoopback:
-            return "Refused: the service address must be on this computer."
+        case ServiceError.destinationRefused:
+            return "Refused: the recommender's address is not on this Mac or the home network."
         case ServiceError.badResponse:
             return "The local service gave an unexpected answer."
+        case ServiceError.untrusted:
+            return "The recommender could not prove who it is, so nothing was sent."
+        case ServiceError.notAllowed:
+            return "The recommender does not accept this Mac. Check its device list."
+        case ServiceError.noDeviceCertificate:
+            return noDeviceCertificate
         case MailError.notAuthorized:
             return "Mail access is not allowed. Turn it on in System Settings > Privacy & Security > Automation."
         case MailError.mailNotRunning:
@@ -98,6 +153,29 @@ public enum MailAdvice {
             return message
         default:
             return (error as? LocalizedError)?.errorDescription ?? String(describing: type(of: error))
+        }
+    }
+
+    static let noDeviceCertificate =
+        "This Mac's device certificate is not installed. Open its .p12 file to add it to the keychain."
+
+    /// The service's errors for a recommender on the home network. Nil for every other error.
+    static func describe(_ error: Error, remote name: String) -> String? {
+        switch error {
+        case ServiceError.unreachable:
+            return "\(name) can't be reached. You can still file by hand, but it won't be learned."
+        case ServiceError.untrusted:
+            return "\(name) could not prove who it is, so nothing was sent."
+        case ServiceError.notAllowed:
+            return "\(name) does not accept this Mac. Check its device list."
+        case ServiceError.noDeviceCertificate:
+            return noDeviceCertificate
+        case ServiceError.api(_, "llm_unavailable", _):
+            return "The model on \(name) is unavailable. Try again shortly."
+        case ServiceError.badResponse:
+            return "\(name) gave an unexpected answer."
+        default:
+            return nil
         }
     }
 }

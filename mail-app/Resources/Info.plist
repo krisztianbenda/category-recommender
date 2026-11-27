@@ -21,7 +21,9 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Category Recommender reads the email you select in Mail and files it under the label you choose. Everything stays on this computer.</string>
+    <string>Category Recommender reads the email you select in Mail and files it under the label you choose. It stays on this computer, or goes to your own recommender on your home network.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Category Recommender asks the recommender on your home network, such as your Mac mini, which label fits an email. Nothing goes beyond your home network.</string>
     <key>NSServices</key>
     <array>
         <dict>

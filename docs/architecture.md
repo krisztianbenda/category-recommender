@@ -6,7 +6,7 @@ This document is kept current with the code (constitution, Principle VII). A cha
 
 ## Overview
 
-Everything runs on one computer and talks over loopback only.
+In local mode everything runs on one computer and talks over loopback only.
 
 ```text
  Browser (web UI)        macOS Mail
@@ -33,6 +33,17 @@ Everything runs on one computer and talks over loopback only.
 | Mail app | [`mail-app/`](../mail-app/) | Swift, JavaScript for Automation | Menu bar client: reads the selected email and the account's labels from Mail, asks the service, files or trashes the email |
 | Model servers | external (`llama.cpp`) | n/a | Two `llama-server` processes: an instruction model for classification and bge-m3 for embeddings |
 | Deployment | [`deploy/`](../deploy/), [`scripts/`](../scripts/) | Bash, config | Local-mode runner, model download, and the optional hardened LAN setup (launchd or systemd, firewall rules, PKI) |
+
+In LAN mode the service and the models still run on one computer, the Mac mini. The Mail app can also run on the owner's other Macs and use it over the home network, through HTTPS with mutual TLS. The email goes from that Mac to the Mac mini, and nowhere else:
+
+```text
+ MacBook                                      Mac mini
+ ┌──────────────┐  HTTPS, mutual TLS         ┌──────────────────────────────┐
+ │ macOS Mail   │  home network only         │ service :8443 (LAN mode)     │
+ │ mail-app ────┼───────────────────────────▶│ llama-server ×2 · SQLite     │
+ └──────────────┘  owner's CA, device cert   │ macOS Mail · mail-app        │
+                                             └──────────────────────────────┘
+```
 
 The components share no code. They communicate over documented contracts:
 
@@ -107,6 +118,16 @@ A menu bar app with no third-party dependencies, in two targets:
 
 The app is a client of the service's HTTP API and holds no learned data of its own.
 
+### Using a recommender on another Mac
+
+By default the app talks to the service on its own Mac over loopback, and starts and stops it on demand. Set up for a recommender on the home network, it connects to that one over HTTPS instead and never starts or stops a service. `ServiceClient` then does three checks before any content leaves the Mac:
+
+- **Address** (`Destination`): plain HTTP only to loopback. HTTPS only to a private address (10/8, 172.16/12, 192.168/16, fc00::/7) or a `.local` or `.home.arpa` name, and a name must resolve to the home network and to no public IPv4 address. Everything else, redirects and proxies are refused before a request is made.
+- **Server** (`RecommenderTrust`): the server's certificate must chain to the owner's own CA and name the host. The authorities macOS trusts for websites do not count.
+- **This Mac**: it proves itself with its device certificate from the keychain, which the owner's CA must have issued. The key stays in the keychain.
+
+The window and the menu say where recommendations come from ("Recommendations from Mac mini") and say so plainly when it can't be reached. Filing by hand still works then, but is not learned, and nothing is queued. `--self-test-remote` reports pass or fail for each step of the connection. Design: [`specs/005-mail-app-lan/plan.md`](../specs/005-mail-app-lan/plan.md), the settings in [`specs/005-mail-app-lan/contracts/client-settings.md`](../specs/005-mail-app-lan/contracts/client-settings.md).
+
 Mail does not report that a label was moved or renamed: the old label is gone and a new one appears. Each sync pairs them on evidence (same name in a new place, a renamed parent's children, or the new label holding emails learned for the old one) and renames or moves the category in place, so its learning stays. Design: the Sync section of [`specs/002-mail-app-integration/plan.md`](../specs/002-mail-app-integration/plan.md).
 
 ### Several emails at once
@@ -125,14 +146,17 @@ With more than one email selected, the window lists them and recommends for each
 | Trashed emails' senders and subjects | Service memory | For the duration of one request |
 | Learned emails' senders and subjects, to find a renamed label | Mail app memory | For one sync, only when a label with learned decisions is gone |
 | Logs | Data and log directories | Identifiers and counts only, rotated |
-| Preferences of the Mail app | `UserDefaults` | Until uninstall |
+| Preferences of the Mail app, including which recommender to use (`baseURL`, `caCertificate`, `deviceCertificate`, `recommenderName`) | `UserDefaults` | Until uninstall |
+| Copy of the owner's CA certificate (public), on a Mac that uses a recommender on the home network | `~/Library/Application Support/Category Recommender/` | Until uninstall |
+| That Mac's device certificate and key | The owner's login keychain, imported by the owner | Until the owner removes it |
 
 The data directory is a configured path outside the repository (`~/.catrec/data` in local mode), and the service refuses to start with a data directory inside it. All rows are scoped by user. The full model is in [`specs/001-local-llm-categorizer/data-model.md`](../specs/001-local-llm-categorizer/data-model.md).
 
 ## Access modes
 
 - **Local mode** (default): plain HTTP on `127.0.0.1` for one owner. Requests whose `Host` is not a loopback name are rejected.
-- **LAN mode** (optional, built): HTTPS with mutual TLS and a per-device fingerprint allowlist that is reloaded on change. `deploy/` holds the service definitions and firewall rules, and `scripts/pki/` creates the certificates.
+- **LAN mode** (optional, built): HTTPS with mutual TLS and a per-device fingerprint allowlist that is reloaded on change. `deploy/` holds the service definitions and firewall rules, and `scripts/pki/` creates the certificates. The server certificate names the Mac mini's address and its Bonjour names (`init-ca.sh --dns`, `new-server-cert.sh`).
+- **The Mail app in LAN mode**: on every Mac, the Mac mini included, the app trusts only the owner's CA for the server, presents its own device certificate, and accepts only addresses on the home network (see [Using a recommender on another Mac](#using-a-recommender-on-another-mac)). Removing a device from the allowlist cuts that Mac off.
 
 The service is never exposed to the internet in either mode.
 
@@ -143,6 +167,7 @@ These follow from the [constitution](../.specify/memory/constitution.md) and sha
 - All inference is local. The LLM client only accepts loopback or allowlisted base URLs, and an integration test fails on any unexpected outbound connection.
 - Downloading models (`scripts/fetch-models.sh`) is the only step that uses the internet, and it has no access to the data.
 - Real emails, labels, folders and learned data never enter the repository. Tests, the demo mode of the Mail app and the evaluation use the fabricated emails in [`fixtures/synthetic/`](../fixtures/synthetic/README.md).
+- The Mail app sends email content only to the owner's recommender: the service on its own Mac, or the owner's service on the home network after it proved itself with the owner's CA. Never to any other address.
 - Logs never contain email content, subjects, addresses or category names.
 
 ## Repository layout

@@ -109,7 +109,7 @@ private struct BatchList: View {
             HStack(spacing: 10) {
                 if session.modelStarting {
                     ProgressView().controlSize(.small)
-                    Text("Starting the local model\u{2026}").font(.caption).foregroundStyle(.secondary)
+                    Text(MailAdvice.startingShort).font(.caption).foregroundStyle(.secondary)
                 } else {
                     Text("\(session.readyCount) of \(session.rows.count) ready")
                         .font(.caption)

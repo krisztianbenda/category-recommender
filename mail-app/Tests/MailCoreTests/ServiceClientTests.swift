@@ -8,6 +8,8 @@ final class StubProtocol: URLProtocol {
     nonisolated(unsafe) static var handler: ((URLRequest) -> (Int, [String: String], Data))?
     nonisolated(unsafe) static var requests: [URLRequest] = []
     nonisolated(unsafe) static var bodies: [Data] = []
+    /// When set, the request fails with this error instead of answering.
+    nonisolated(unsafe) static var failure: URLError?
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -27,6 +29,10 @@ final class StubProtocol: URLProtocol {
             stream.close()
             Self.bodies.append(data)
         }
+        if let failure = Self.failure {
+            client?.urlProtocol(self, didFailWithError: failure)
+            return
+        }
         let (status, headers, data) = Self.handler?(request) ?? (500, [:], Data())
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -40,7 +46,85 @@ struct ServiceClientTests {
     private func client() throws -> ServiceClient {
         StubProtocol.requests = []
         StubProtocol.bodies = []
+        StubProtocol.failure = nil
         return try ServiceClient(protocolClasses: [StubProtocol.self])
+    }
+
+    /// A client for a recommender on the home network. The stub answers in-process, so no TLS runs.
+    private func remoteClient(
+        _ url: String = "https://192.168.1.10:8443", resolvingTo answers: [String] = ["192.168.1.10"]
+    ) throws -> ServiceClient {
+        StubProtocol.requests = []
+        StubProtocol.bodies = []
+        StubProtocol.failure = nil
+        let pki = try TestPKI()
+        defer { pki.cleanup() }
+        return try ServiceClient(
+            baseURL: URL(string: url)!, trust: RecommenderTrust(caPEM: pki.caPEM), deviceLabel: "test-device",
+            resolver: { _ in answers }, protocolClasses: [StubProtocol.self])
+    }
+
+    @Test(arguments: ["https://192.168.1.10:8443", "https://8.8.8.8", "https://mini.local:8443"])
+    func theHomeNetworkNeedsTheOwnersCA(url: String) {
+        #expect(throws: ServiceError.destinationRefused) { try ServiceClient(baseURL: URL(string: url)!) }
+    }
+
+    @Test func aRefusedAddressSendsNothing() async throws {
+        let pki = try TestPKI()
+        defer { pki.cleanup() }
+        StubProtocol.requests = []
+        #expect(throws: ServiceError.destinationRefused) {
+            try ServiceClient(
+                baseURL: URL(string: "https://203.0.113.7:8443")!, trust: RecommenderTrust(caPEM: pki.caPEM),
+                deviceLabel: "test-device", protocolClasses: [StubProtocol.self])
+        }
+        #expect(StubProtocol.requests.isEmpty)
+    }
+
+    @Test func aNameIsUsedOnlyWhenItResolvesIntoTheHomeNetwork() async throws {
+        StubProtocol.handler = { _ in (200, [:], Data("[]".utf8)) }
+        let outside = try remoteClient("https://mini.local:8443", resolvingTo: ["203.0.113.7"])
+        await #expect(throws: ServiceError.destinationRefused) { _ = try await outside.listSets() }
+        #expect(StubProtocol.requests.isEmpty)
+
+        let home = try remoteClient("https://mini.local:8443")
+        #expect(try await home.listSets().isEmpty)
+        #expect(StubProtocol.requests.map { $0.url?.host } == ["mini.local"])
+    }
+
+    @Test func aRemoteClientIsRemote() throws {
+        #expect(try remoteClient().isRemote)
+        #expect(try !client().isRemote)
+    }
+
+    @Test func theRecommenderRefusingThisMacIsNotAllowed() async throws {
+        let client = try remoteClient()
+        StubProtocol.handler = { _ in
+            (403, [:], Data(#"{"error":{"code":"forbidden","message":"this device is not allowed"}}"#.utf8))
+        }
+        await #expect(throws: ServiceError.notAllowed) { _ = try await client.health() }
+    }
+
+    @Test func onThisMacAForbiddenAnswerStaysAnAPIError() async throws {
+        let client = try client()
+        StubProtocol.handler = { _ in
+            (403, [:], Data(#"{"error":{"code":"forbidden","message":"only localhost is allowed"}}"#.utf8))
+        }
+        await #expect(throws: ServiceError.api(status: 403, code: "forbidden", message: "only localhost is allowed")) {
+            _ = try await client.health()
+        }
+    }
+
+    @Test func aRejectedClientCertificateIsNotAllowed() async throws {
+        let client = try remoteClient()
+        StubProtocol.failure = URLError(.clientCertificateRejected)
+        await #expect(throws: ServiceError.notAllowed) { _ = try await client.health() }
+    }
+
+    @Test func noConnectionIsUnreachable() async throws {
+        let client = try remoteClient()
+        StubProtocol.failure = URLError(.cannotConnectToHost)
+        await #expect(throws: ServiceError.unreachable) { _ = try await client.health() }
     }
 
     @Test(arguments: [
@@ -56,7 +140,7 @@ struct ServiceClientTests {
     ])
     func refusesEverythingElse(url: String) {
         #expect(!ServiceClient.isLoopback(URL(string: url)!))
-        #expect(throws: ServiceError.notLoopback) { try ServiceClient(baseURL: URL(string: url)!) }
+        #expect(throws: ServiceError.destinationRefused) { try ServiceClient(baseURL: URL(string: url)!) }
     }
 
     @Test func aRedirectIsNotFollowed() async throws {

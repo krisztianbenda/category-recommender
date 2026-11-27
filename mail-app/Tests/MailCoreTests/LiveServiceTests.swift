@@ -276,3 +276,64 @@ struct LiveServiceTests {
         #expect(hits["hits"] == 0)
     }
 }
+
+// The same client against the real service in LAN mode, with a throwaway PKI and a throwaway
+// keychain made by tests/e2e.sh (specs/005-mail-app-lan, research R14). Skipped otherwise.
+private let lanEnvironment = ProcessInfo.processInfo.environment
+private let lanURL = lanEnvironment["CATREC_TEST_LAN_URL"].flatMap(URL.init(string:))
+
+@Suite(.serialized, .enabled(if: lanURL != nil))
+struct LiveServiceTestsLAN {
+    private let email = Email(
+        from: "Clinic <clinic@example.test>", subject: "Newborn check-up",
+        body: "The baby sees the paediatrician on Friday.")
+
+    private func client(
+        _ url: URL? = lanURL, device: String? = lanEnvironment["CATREC_TEST_DEVICE_CERT"]
+    ) throws -> ServiceClient {
+        let pem = try Data(contentsOf: URL(fileURLWithPath: lanEnvironment["CATREC_TEST_CA_FILE"] ?? ""))
+        let trust = try RecommenderTrust(caPEM: pem, keychainPath: lanEnvironment["CATREC_KEYCHAIN"])
+        return try ServiceClient(baseURL: try #require(url), trust: trust, deviceLabel: device)
+    }
+
+    @Test func filesAndLearnsThroughTheRecommender() async throws {
+        let client = try client()
+        #expect(client.isRemote)
+        #expect(try await client.health().isReady)
+        let setId = try await client.createSet(
+            name: "Gmail: lan-\(UUID().uuidString.prefix(8))@example.test",
+            categories: ["Family", "Family/Baby", "Finance"])
+        let suggestion = try await client.suggest(email: email, setId: setId)
+        #expect(suggestion.category == "Family/Baby")
+        try await client.feedback(suggestionId: suggestion.suggestionId, email: email, decision: .confirm)
+        let detail = try await client.getSet(id: setId)
+        let baby = try #require(detail.categories.first { $0.path == "Family/Baby" })
+        #expect(baby.exampleCount == 1)
+        let learned = try await client.learnedEmails(categoryId: baby.id, limit: 5)
+        #expect(learned.contains { $0.subject == "Newborn check-up" })
+    }
+
+    @Test(.enabled(if: lanEnvironment["CATREC_TEST_IMPOSTOR_URL"] != nil))
+    func anImpostorGetsNothing() async throws {
+        let client = try client(lanEnvironment["CATREC_TEST_IMPOSTOR_URL"].flatMap(URL.init(string:)))
+        await #expect(throws: ServiceError.untrusted) { _ = try await client.health() }
+        await #expect(throws: ServiceError.untrusted) {
+            _ = try await client.suggest(email: email, categories: ["Family/Baby"])
+        }
+        let counter = try #require(lanEnvironment["CATREC_TEST_IMPOSTOR_HITS_URL"].flatMap(URL.init(string:)))
+        let (data, _) = try await URLSession(configuration: .ephemeral).data(from: counter)
+        let hits = try JSONDecoder().decode([String: Int].self, from: data)["hits"]
+        #expect(hits == 0)
+    }
+
+    @Test(.enabled(if: lanEnvironment["CATREC_TEST_UNLISTED_CERT"] != nil))
+    func aMacThatIsNotListedIsNotAllowed() async throws {
+        let client = try client(device: lanEnvironment["CATREC_TEST_UNLISTED_CERT"])
+        await #expect(throws: ServiceError.notAllowed) { _ = try await client.health() }
+    }
+
+    @Test func aMissingDeviceCertificateIsSaid() async throws {
+        let client = try client(device: "no-such-device")
+        await #expect(throws: ServiceError.noDeviceCertificate) { _ = try await client.health() }
+    }
+}

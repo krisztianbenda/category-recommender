@@ -62,6 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeMenu() -> NSMenu {
         let menu = NSMenu()
+        // Where recommendations come from (spec 005, FR-011). Not clickable.
+        let source = NSMenuItem(title: MailAdvice.source, action: nil, keyEquivalent: "")
+        source.isEnabled = false
+        menu.addItem(source)
+        menu.addItem(.separator())
         let recommend = NSMenuItem(
             title: "Recommend a Label for the Selected Email", action: #selector(triggerFromMenu), keyEquivalent: "l")
         recommend.keyEquivalentModifierMask = [.control, .option]

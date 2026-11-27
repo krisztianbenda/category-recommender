@@ -6,6 +6,8 @@
 //   --self-test-selection --out FILE
 //                                  owner-run check that Mail lets the app select some of the
 //                                  selected emails; changes no email, pass or fail only
+//   --self-test-remote --out FILE  the connection to a recommender on the home network, with a
+//                                  fabricated email; pass, fail or not run per step, no content
 //   --demo [--newsletter | --batch] [--snapshot FILE | --drive FILE]
 //                                  synthetic Mail, nothing real is touched; --newsletter shows
 //                                  an email like three in the synthetic Trash, --batch six
@@ -65,9 +67,27 @@ if let (command, timeout) = check {
     RunLoop.main.run()
 }
 
-guard let client = try? ServiceClient(baseURL: settings.baseURL) else {
-    FileHandle.standardError.write(Data("Refused: the service address must be on this computer.\n".utf8))
+let client: ServiceClient
+do {
+    client = try settings.makeClient()
+} catch {
+    let refusal = error as? AppSettings.Refusal ?? .address
+    if arguments.contains("--self-test-remote") {
+        RemoteSelfTest.writeRefused(refusal, to: value(after: "--out"))
+        exit(0)
+    }
+    FileHandle.standardError.write(Data((refusal.message + "\n").utf8))
     exit(2)
+}
+let remoteName = client.isRemote ? settings.displayName(for: client.baseURL) : nil
+MailAdvice.recommender = remoteName.map { .named($0) } ?? .thisMac
+
+if arguments.contains("--self-test-remote") {
+    Task {
+        await RemoteSelfTest(client: client).run(to: value(after: "--out"))
+        exit(0)
+    }
+    RunLoop.main.run()
 }
 
 let logURL = ProcessInfo.processInfo.environment["CATREC_MAIL_LOG"].map(URL.init(fileURLWithPath:))
@@ -76,7 +96,9 @@ let log = EventLog(url: logURL)
 let launch = InstallInfo.load().map {
     Backend.Launch(script: URL(fileURLWithPath: $0.runLocalScript), path: $0.path)
 }
-let backend = Backend(client: client, launch: launch, idleMinutes: settings.idleMinutes, logger: log)
+let backend = Backend(
+    client: client, launch: launch, idleMinutes: settings.idleMinutes, logger: log, remoteName: remoteName)
+if remoteName != nil { log.log("recommender_remote") }
 
 let application = NSApplication.shared
 application.setActivationPolicy(.accessory)

@@ -232,9 +232,9 @@ private struct RecommendationBanner: View {
             case .none:
                 EmptyView()
             case .startingModel:
-                status("Starting the local model. Only the first email takes a while.")
+                status(MailAdvice.starting)
             case .thinking:
-                status("Reading the email on this computer\u{2026}")
+                status(MailAdvice.thinking)
             case .ready(let suggestion):
                 details(suggestion)
             case .unavailable(let message):

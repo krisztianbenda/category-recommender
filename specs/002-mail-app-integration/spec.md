@@ -146,6 +146,7 @@ The owner does not have to start anything in a terminal. Triggering the recommen
 **Privacy**
 
 - **FR-022**: Email content, labels and recommendations MUST NOT leave this computer through the integration. It MUST only talk to the recommendation service on this computer, and MUST refuse any other destination.
+  - *Note*: Replaced by [spec 005, FR-023](../005-mail-app-lan/spec.md): the integration may also use the owner's recommender on the home network.
 - **FR-023**: The integration MUST NOT store email content on disk. Its logs MUST contain only identifiers and metadata.
 - **FR-024**: Development and automated checks MUST use synthetic emails and labels only, and MUST NOT show real emails, labels or recommendations to an AI assistant.
 

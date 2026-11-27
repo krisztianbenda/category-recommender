@@ -1,8 +1,8 @@
 # Mail integration
 
-File the email selected in macOS Mail under the label or folder the local recommender suggests, in two actions: a shortcut, then Return. Select several emails and each one gets its own recommendation, which you approve all at once or one by one. It works with every account in Mail: Gmail accounts by their labels, and iCloud, Exchange and other accounts by their folders. When you usually delete emails like it, the recommendation is to move it to the Trash instead. It can also create or delete a label from the same window. Everything runs on this Mac.
+File the email selected in macOS Mail under the label or folder the local recommender suggests, in two actions: a shortcut, then Return. Select several emails and each one gets its own recommendation, which you approve all at once or one by one. It works with every account in Mail: Gmail accounts by their labels, and iCloud, Exchange and other accounts by their folders. When you usually delete emails like it, the recommendation is to move it to the Trash instead. It can also create or delete a label from the same window. Everything runs on this Mac, or on your own recommender on another Mac at home: see [Use it on another Mac](#use-it-on-another-mac).
 
-Design: [`specs/002-mail-app-integration/`](../specs/002-mail-app-integration/plan.md), [`specs/003-delete-suggestion/`](../specs/003-delete-suggestion/plan.md) for deleting, and [`specs/004-batch-recommendations/`](../specs/004-batch-recommendations/plan.md) for several emails at once.
+Design: [`specs/002-mail-app-integration/`](../specs/002-mail-app-integration/plan.md), [`specs/003-delete-suggestion/`](../specs/003-delete-suggestion/plan.md) for deleting, [`specs/004-batch-recommendations/`](../specs/004-batch-recommendations/plan.md) for several emails at once, and [`specs/005-mail-app-lan/`](../specs/005-mail-app-lan/plan.md) for using a recommender on another Mac.
 
 ## Install
 
@@ -126,9 +126,27 @@ Labels and folders are read from Mail every time you open the window, and the ac
 - **Deep labels**: the recommender allows two levels, so `Work/Clients/Acme` appears as `Work/Clients › Acme`. It is still filed under the right label.
 - **Many labels**: the recommender considers the first 300, alphabetically. The window tells you if there are more, and you can still pick them by hand.
 
+## Use it on another Mac
+
+On a MacBook, the app can use the recommender and the model on your Mac mini, over your home network only. The Mac mini needs the hardened LAN setup, and each Mac a device certificate from it. The steps are in [Use the Mail app from another Mac](../docs/operations.md#use-the-mail-app-from-another-mac). On the Mac, after you opened its `.p12` in Finder:
+
+```bash
+mail-app/scripts/install.sh --remote https://krisz-mac-mini.local:8443 --ca ~/Downloads/ca.crt --device krisz-macbook --name "Mac mini"
+```
+
+That Mac needs neither Node.js, `llama.cpp` nor the models, and the app never starts a service there.
+
+- The menu and the window say **Recommendations from Mac mini**, and the window says **Asking Mac mini…** while it waits.
+- The Mac mini keeps the model loaded, so there is no start-up wait.
+- When the Mac mini can't be reached, for example away from home, the window says so within a few seconds. You can still file the email by hand, but that decision is not learned, and nothing is kept to send later.
+- Everything you teach it from any of your Macs goes into the same learned data on the Mac mini.
+
+To go back to the recommender on this Mac, run `mail-app/scripts/install.sh` without options.
+
 ## Privacy
 
-- The app only talks to the service on this Mac. It refuses any other address, redirects and proxies.
+- The app only talks to the service on this Mac, or to your own recommender on your home network. For that one, it sends nothing until the Mac mini has proved itself with a certificate from your own CA, and macOS's usual website authorities don't count. It only accepts an address on the home network: a private address or a `.local` name that resolves to one. It refuses any other address, redirects and proxies.
+- This Mac proves itself to the Mac mini with its device certificate. The key stays in your keychain, and the app never reads or copies it.
 - Email text stays in memory, and it is gone when the window closes or the decision has been recorded. What the service stores when you file or delete an email is the same as for the web UI.
 - From the Trash, the app reads only the sender and subject of emails from the selected email's sender, at most 20, or from each sender of a batch. They go to the service with the request and are not stored.
 - With several emails selected, the app reads the text of up to 50 of them into memory, in the background. It is gone when the window closes, or once the decisions you made have been learned.
@@ -148,6 +166,12 @@ Labels and folders are read from Mail every time you open the window, and the ac
 | A row says "Mail would not select just this email" | Expand the conversation in Mail, or turn off **View > Organize by Conversation**, and try again |
 | The shortcut does nothing | Mail must be the active app. The shortcut is only active then, so it doesn't take the combination from other apps. The menu bar icon works anywhere |
 | No entry under Mail > Services | System Settings > Keyboard > Keyboard Shortcuts > Services: turn on **Recommend a Label** |
+| "Mac mini can't be reached" | Check that this Mac is on your home network, and that the Mac mini is awake and its service running. Run `--self-test-remote` (below) to see which step fails |
+| "Mac mini could not prove who it is, so nothing was sent" | The server's certificate is not from your CA, or doesn't name the address you installed with. Check that `--ca` was the right `ca.crt`, and that the address is among the server certificate's names (`new-server-cert.sh --dns`) |
+| "Mac mini does not accept this Mac" | This Mac's entry is missing from `access.devices` on the Mac mini, or its fingerprint is wrong. Paste the lines `new-device.sh` printed |
+| "This Mac's device certificate is not installed" | Open this Mac's `.p12` in Finder. The name given to `install.sh --device` must be the one given to `new-device.sh` |
+| macOS asks to find devices on the local network | Choose **Allow**. Without it, the Mac mini can't be reached. To change it later: System Settings > Privacy & Security > Local Network |
+| The keychain asks whether Category Recommender may use a key | Choose **Always Allow**, as the app needs this Mac's device certificate. After a reinstall, macOS asks again |
 | "The local service stopped while starting" | Run `scripts/run-local.sh` in a terminal to see why |
 | The permission prompt comes back | Reinstalling can make macOS treat the app as new. Choose **Allow** again |
 
@@ -162,6 +186,14 @@ open -n "$HOME/Applications/Category Recommender.app" --args --self-test-local -
 ```
 
 `--diagnose` also reports, for each account, whether it is Gmail (`gmail`), whether its Inbox was found (`inboxFound`), whether the Trash was found (`trashFound`), whether through Mail's own Trash (`trashFoundThroughMail`), and how many emails it holds (`trashMessages`).
+
+To check the connection to a recommender on another Mac:
+
+```bash
+open -n "$HOME/Applications/Category Recommender.app" --args --self-test-remote --out /tmp/catrec-remote.json
+```
+
+It reports pass or fail for each step: the address is on the home network (`address`), the Mac mini answers (`reachable`), it proved itself with your CA (`identity`), it accepts this Mac (`accepted`), its model is ready (`model`), and a recommendation for two fabricated categories comes back in time (`timing`). A failed step has a hint. The report has no address and no content.
 
 `--self-test-local` uses mailboxes under On My Mac and three fabricated messages. It also checks that the app can select two of them, as a batch does. Mail doesn't let scripts delete mailboxes, so `catrec-selftest` and `Import` stay under On My Mac until you delete them. Later runs reuse them.
 
@@ -183,7 +215,7 @@ Your labels and what the recommender has learned stay. Delete learned data under
 
 ## Develop
 
-`scripts/test.sh` runs the unit tests and the bridge tests. `tests/e2e.sh` runs the real service with a stub model, and checks the running app only connects to this Mac. All of these use synthetic data. Run the app with `.build/debug/CategoryRecommender --demo` to try the window against a synthetic Mail. Add `--newsletter` for an email like three in the synthetic Trash, which is recommended for deletion, or `--batch` for six synthetic emails selected at once. With `--batch --drive report.json`, it presses the batch window's keys and reports what happened.
+`scripts/test.sh` runs the unit tests and the bridge tests. `tests/e2e.sh` runs the real service with a stub model, and checks the running app only connects to this Mac. It also runs a LAN-mode service with a throwaway CA and a throwaway keychain, and checks that the app learns through it, refuses an impostor and an unlisted device, and connects to nothing else. All of these use synthetic data. Run the app with `.build/debug/CategoryRecommender --demo` to try the window against a synthetic Mail. Add `--newsletter` for an email like three in the synthetic Trash, which is recommended for deletion, or `--batch` for six synthetic emails selected at once. With `--batch --drive report.json`, it presses the batch window's keys and reports what happened.
 
 ```text
 Resources/mail-bridge.js      everything that talks to Mail

@@ -1,11 +1,22 @@
-// HTTP client for the service on this computer (FR-022). It refuses any address other than
-// loopback, follows no redirects, uses no proxy, and keeps no cache or cookies, so email text can
-// neither leave this computer through it nor land on disk.
+// HTTP client for the recommendation service (FR-022 of spec 002, FR-003 to FR-009 of spec 005).
+// It talks to the service on this Mac over loopback, or, when the owner has set up their CA and a
+// device certificate, to their recommender on the home network over HTTPS, after the recommender has
+// proved itself with a certificate from that CA. It refuses any other address, follows no
+// redirects, uses no proxy, and keeps no cache, cookies or credentials, so email text can neither
+// leave the home network through it nor land on disk.
 import Foundation
+import Security
 
 public enum ServiceError: Error, Equatable {
-    case notLoopback
+    /// The address is neither this Mac nor the home network (spec 005, research R3).
+    case destinationRefused
     case unreachable
+    /// The recommender could not prove it holds a certificate from the owner's CA. Nothing was sent.
+    case untrusted
+    /// The recommender refused this Mac's device certificate.
+    case notAllowed
+    /// This Mac's device certificate is not in the keychain.
+    case noDeviceCertificate
     case api(status: Int, code: String, message: String)
     case badResponse(status: Int)
 }
@@ -46,6 +57,8 @@ extension RecommenderAPI {
     }
 }
 
+/// The session's own delegate refuses redirects only. Everything else, including the TLS challenges,
+/// goes to the per-request `RequestDelegate`, which is why this one must not answer challenges.
 private final class RefuseRedirects: NSObject, URLSessionTaskDelegate {
     func urlSession(
         _ session: URLSession, task: URLSessionTask,
@@ -56,22 +69,114 @@ private final class RefuseRedirects: NSObject, URLSessionTaskDelegate {
     }
 }
 
+/// One per request: refuses redirects, checks the recommender against the owner's CA, answers with
+/// this Mac's device certificate, and remembers why a request failed, so the caller can tell an
+/// impostor from a Mac mini that is asleep.
+private final class RequestDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    let trust: RecommenderTrust?
+    let deviceLabel: String?
+    private let lock = NSLock()
+    private var failure: ServiceError?
+
+    init(trust: RecommenderTrust?, deviceLabel: String?) {
+        self.trust = trust
+        self.deviceLabel = deviceLabel
+    }
+
+    var recordedFailure: ServiceError? { lock.withLock { failure } }
+
+    private func record(_ error: ServiceError) {
+        lock.withLock { failure = failure ?? error }
+    }
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        let space = challenge.protectionSpace
+        guard let trust else {
+            // The service on this Mac: as before.
+            return completionHandler(.performDefaultHandling, nil)
+        }
+        switch space.authenticationMethod {
+        case NSURLAuthenticationMethodServerTrust:
+            guard let serverTrust = space.serverTrust, trust.evaluate(serverTrust, host: space.host) else {
+                record(.untrusted)
+                return completionHandler(.cancelAuthenticationChallenge, nil)
+            }
+            completionHandler(.useCredential, URLCredential(trust: serverTrust))
+        case NSURLAuthenticationMethodClientCertificate:
+            guard let deviceLabel, let identity = trust.deviceIdentity(label: deviceLabel) else {
+                record(.noDeviceCertificate)
+                return completionHandler(.cancelAuthenticationChallenge, nil)
+            }
+            completionHandler(.useCredential, URLCredential(identity: identity, certificates: nil, persistence: .forSession))
+        default:
+            completionHandler(.cancelAuthenticationChallenge, nil)
+        }
+    }
+}
+
+/// A name's check against the home network, kept for a minute so a batch resolves it once.
+private final class ResolutionCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var checked: (host: String, ok: Bool, at: Date)?
+
+    func isHomeNetwork(_ host: String, resolver: @escaping @Sendable (String) -> [String]?) async -> Bool {
+        if let ok = cached(host) { return ok }
+        let ok = await Task.detached { Destination.resolvesToHomeNetwork(host, resolver: resolver) }.value
+        lock.withLock { checked = (host, ok, Date()) }
+        return ok
+    }
+
+    private func cached(_ host: String) -> Bool? {
+        lock.withLock {
+            guard let checked, checked.host == host, Date().timeIntervalSince(checked.at) < 60 else { return nil }
+            return checked.ok
+        }
+    }
+}
+
 public final class ServiceClient: RecommenderAPI, @unchecked Sendable {
     public static let defaultBaseURL = URL(string: "http://127.0.0.1:8080")!
-    private static let loopbackHosts: Set<String> = ["127.0.0.1", "localhost", "::1", "[::1]"]
 
     public let baseURL: URL
     private let session: URLSession
+    private let trust: RecommenderTrust?
+    private let deviceLabel: String?
+    private let resolver: @Sendable (String) -> [String]?
+    private let resolution = ResolutionCache()
 
-    public static func isLoopback(_ url: URL) -> Bool {
-        guard url.scheme == "http" || url.scheme == "https", let host = url.host else { return false }
-        return url.user == nil && loopbackHosts.contains(host.lowercased())
-    }
+    public static func isLoopback(_ url: URL) -> Bool { Destination.isLoopback(url) }
 
-    /// - Parameter protocolClasses: for tests only.
-    public init(baseURL: URL = ServiceClient.defaultBaseURL, protocolClasses: [AnyClass]? = nil) throws {
-        guard Self.isLoopback(baseURL) else { throw ServiceError.notLoopback }
+    /// A recommender on the home network, or one reached through the owner's CA.
+    public var isRemote: Bool { trust != nil || !Destination.isLoopback(baseURL) }
+
+    /// - Parameters:
+    ///   - trust: the owner's CA, for a recommender on the home network.
+    ///   - deviceLabel: this Mac's device certificate in the keychain.
+    ///   - resolver: for tests only.
+    ///   - protocolClasses: for tests only.
+    public init(
+        baseURL: URL = ServiceClient.defaultBaseURL, trust: RecommenderTrust? = nil, deviceLabel: String? = nil,
+        resolver: @escaping @Sendable (String) -> [String]? = Destination.systemResolve,
+        protocolClasses: [AnyClass]? = nil
+    ) throws {
+        guard Destination.check(baseURL, trusted: trust != nil && deviceLabel != nil) else {
+            throw ServiceError.destinationRefused
+        }
         self.baseURL = baseURL
+        self.trust = trust
+        self.deviceLabel = trust == nil ? nil : deviceLabel
+        self.resolver = resolver
         let config = URLSessionConfiguration.ephemeral
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -82,6 +187,12 @@ public final class ServiceClient: RecommenderAPI, @unchecked Sendable {
         config.waitsForConnectivity = false
         if let protocolClasses { config.protocolClasses = protocolClasses }
         session = URLSession(configuration: config, delegate: RefuseRedirects(), delegateQueue: nil)
+    }
+
+    /// Whether the base URL's name resolves into the home network. True for addresses.
+    public func resolvesToHomeNetwork() async -> Bool {
+        guard Destination.needsResolving(baseURL), let host = Destination.host(of: baseURL) else { return true }
+        return await resolution.isHomeNetwork(host, resolver: resolver)
     }
 
     private struct ErrorEnvelope: Decodable {
@@ -95,31 +206,46 @@ public final class ServiceClient: RecommenderAPI, @unchecked Sendable {
     private func send(
         _ method: String, _ path: String, body: Data? = nil, timeout: TimeInterval = 20
     ) async throws -> Data {
-        guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL, Self.isLoopback(url) else {
-            throw ServiceError.notLoopback
+        guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL,
+            url.host == baseURL.host, url.port == baseURL.port,
+            Destination.check(url, trusted: deviceLabel != nil)
+        else {
+            throw ServiceError.destinationRefused
         }
+        guard await resolvesToHomeNetwork() else { throw ServiceError.destinationRefused }
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
         if let body {
             request.httpBody = body
             request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "content-type")
         }
+        let delegate = RequestDelegate(trust: trust, deviceLabel: deviceLabel)
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await session.data(for: request, delegate: delegate)
         } catch {
-            throw ServiceError.unreachable
+            throw delegate.recordedFailure ?? Self.transportError(error)
         }
         guard let http = response as? HTTPURLResponse else { throw ServiceError.badResponse(status: 0) }
         guard (200..<300).contains(http.statusCode) else {
             if let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: data) {
+                if isRemote, http.statusCode == 403, envelope.error.code == "forbidden" {
+                    throw ServiceError.notAllowed
+                }
                 throw ServiceError.api(
                     status: http.statusCode, code: envelope.error.code, message: envelope.error.message)
             }
             throw ServiceError.badResponse(status: http.statusCode)
         }
         return data
+    }
+
+    static func transportError(_ error: Error) -> ServiceError {
+        switch (error as? URLError)?.code {
+        case .clientCertificateRejected?, .clientCertificateRequired?: return .notAllowed
+        default: return .unreachable
+        }
     }
 
     private func decode<T: Decodable>(_ type: T.Type, _ data: Data, status: Int = 200) throws -> T {
@@ -214,6 +340,18 @@ public final class ServiceClient: RecommenderAPI, @unchecked Sendable {
         let categorySetId: String
         let allowDelete: Bool
         let trash: [TrashedEmail]
+    }
+
+    private struct InlineSuggestBody: Encodable {
+        let email: Email
+        let categories: [String]
+    }
+
+    /// A suggestion among categories given with the request, so no category set is created. For the
+    /// remote self-test, which never sends feedback for it: the suggestion expires on the service.
+    public func suggest(email: Email, categories: [String]) async throws -> Suggestion {
+        let body = try JSONEncoder().encode(InlineSuggestBody(email: email, categories: categories))
+        return try decode(Suggestion.self, try await send("POST", "/v1/suggestions", body: body, timeout: 180))
     }
 
     public func suggest(

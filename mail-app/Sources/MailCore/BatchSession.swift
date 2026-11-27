@@ -309,6 +309,8 @@ public final class BatchSession: ObservableObject {
         } catch {
             modelStarting = false
             let text = MailAdvice.describe(error)
+            // Said once for the window too, since every row is affected (spec 005, FR-012).
+            notice = text
             for row in rows where row.recommendation == .none {
                 update(row.id) {
                     $0.recommendation = .unavailable(text)

@@ -18,17 +18,8 @@ struct BatchSessionTests {
     static let porto2 = Email(from: "Hotel <stay@hotel.example.test>", subject: "Hotel in Porto", body: "Booked")
     static let empty = Email(from: "Nobody <no@example.test>", subject: "", body: "")
 
-    /// A batch of these emails, ids m1, m2, … in this order (newest first).
     private func opening(_ emails: [Email], total: Int? = nil) -> MailOpening {
-        let refs = emails.enumerated().map { i, email in
-            MailMessageRef(
-                id: i + 1, mailbox: "[Gmail]/All Mail", account: "Google", date: Double(100 - i),
-                messageId: "m\(i + 1)", from: email.from, subject: email.subject)
-        }
-        for (ref, email) in zip(refs, emails) { mail.emails[ref.messageId!] = email }
-        return MailOpening(
-            selection: MailSelection(total: total ?? emails.count, messages: refs, latest: nil),
-            accounts: mail.accounts, labels: AccountLabels(mailboxes: mail.mailboxes), viewed: ["INBOX"])
+        mail.opening(emails, total: total)
     }
 
     private func started(_ emails: [Email], total: Int? = nil, keepInInbox: Bool = false) async -> BatchSession {

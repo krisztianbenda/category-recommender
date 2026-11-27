@@ -2,7 +2,7 @@
 
 A private email category recommender that runs entirely on your own Mac. Give it an email and your categories (up to two levels, for example `Family/Baby`) and it suggests one category, or proposes a new one, using a local LLM. When you usually delete emails like it, it suggests deleting it instead. It learns from your confirmations, corrections and deletions.
 
-Nothing leaves your computer: there are no cloud APIs, no telemetry, and the only step that uses the internet is downloading the models.
+Nothing leaves your computer: there are no cloud APIs, no telemetry, and the only step that uses the internet is downloading the models. You can also use the Mail app on another of your Macs, such as a MacBook, with the recommender on your Mac mini: the email then goes to the Mac mini over your home network, and nowhere else. See [Use the Mail app from another Mac](docs/operations.md#use-the-mail-app-from-another-mac).
 
 You can use it in two ways:
 

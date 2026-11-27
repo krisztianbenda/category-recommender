@@ -38,6 +38,8 @@ cd service && CATREC_CONFIG=~/.catrec/config.yaml npm run eval -- --suite refere
 
 To file emails from macOS Mail under Gmail labels, install the menu bar app: `mail-app/scripts/install.sh`. It starts this service on demand, so you don't need to run `run-local.sh` yourself. It can also move an email to the Trash, and suggests that when you usually delete emails like it. See [`mail-app/README.md`](../mail-app/README.md).
 
+To use it from another Mac, such as a MacBook, the recommender needs the hardened LAN setup below: see [Use the Mail app from another Mac](#use-the-mail-app-from-another-mac).
+
 ### Removing the hardened setup
 
 If you installed the launchd/`catrec` setup described below, remove it before using local mode. Local mode needs ports 8080–8082 free.
@@ -58,7 +60,7 @@ sudo rm -rf /opt/catrec/service /var/log/catrec && sudo sysadminctl -deleteUser 
 
 ## Hardened LAN setup (later)
 
-The rest of this guide covers a separate install for use from other devices on your network. It uses a non-admin `catrec` service user, device certificates (mTLS) and pf egress rules. You don't need it for local mode.
+The rest of this guide covers a separate install for use from other devices on your network, for example the Mail app on your MacBook. It uses a non-admin `catrec` service user, device certificates (mTLS) and pf egress rules. You don't need it for local mode.
 
 ## Layout on the Mac Mini
 
@@ -85,11 +87,13 @@ Prerequisites: FileVault on (`fdesetup status`), Homebrew, `brew install llama.c
 
    The first run records SHA-256 checksums in `scripts/models.lock`. Compare them with the publisher's pages, then commit the lock file. Later runs (without `--pin`) verify every file.
 
-2. **PKI**: use the Mac Mini's LAN address.
+2. **PKI**: use the Mac Mini's LAN address, and its Bonjour name (System Settings > General > Sharing, at the bottom: "Local hostname"), so other Macs can find it even when the address changes.
 
    ```bash
-   sudo -u catrec scripts/pki/init-ca.sh 192.168.1.10
+   sudo -u catrec scripts/pki/init-ca.sh 192.168.1.10 --dns krisz-mac-mini.local
    ```
+
+   `--dns` can be given more than once. The server certificate always names `catrec.local` as well, and is valid for 825 days.
 
    (Run `setup.sh` first if the `catrec` user does not exist yet, or run the PKI script as your admin user with `--dir` and then `chown -R catrec` the directory.)
 
@@ -121,7 +125,7 @@ curl --cacert ca.crt --cert device.pem https://<lan-ip>:8443/v1/health
 sudo -u catrec scripts/pki/new-device.sh krisz-phone
 ```
 
-Import the resulting `devices/krisz-phone.p12` on the device. Also install `ca.crt` as a trusted root, so the browser trusts the server. Paste the printed lines into `access.devices` in the config. The change applies within a second, with no restart.
+Import the resulting `devices/krisz-phone.p12` on the device. For a browser, also install `ca.crt` as a trusted root, so it trusts the server. The Mail app doesn't need that: it trusts only `ca.crt`, and only for the recommender. Paste the printed lines into `access.devices` in the config. The change applies within a second, with no restart.
 
 **Revoke a device:** delete its entry from `access.devices`. It is refused from the next request on. To retire the certificate completely, also delete `devices/<name>.crt`/`.p12`.
 
@@ -132,7 +136,74 @@ Import the resulting `devices/krisz-phone.p12` on the device. Also install `ca.c
 4. Replace `access.devices`.
 5. Restart: `sudo launchctl kickstart -k system/com.catrec.service`.
 
-Keep `ca.key` offline (an encrypted USB stick) once your devices are issued.
+Keep `ca.key` offline (an encrypted USB stick) once your devices are issued. Bring it back to add a device or renew the server certificate.
+
+**Renew the server certificate** before its 825 days are up, or when the Mac mini's address or name changes. With `ca.key` back in the PKI directory:
+
+```bash
+sudo -u catrec scripts/pki/new-server-cert.sh 192.168.1.10 --dns krisz-mac-mini.local
+```
+
+```bash
+sudo launchctl kickstart -k system/com.catrec.service
+```
+
+The CA and the device certificates stay the same, so no device needs anything new. The old certificate is kept as `server.crt.previous`.
+
+## Use the Mail app from another Mac
+
+The Mail app on your MacBook can use the recommender and the model on the Mac mini, over your home network only. The email goes from the MacBook to the Mac mini over HTTPS with mutual TLS, and nowhere else. The Mac mini proves itself with a certificate from your CA, and the MacBook with its device certificate. Design: [`specs/005-mail-app-lan/`](../specs/005-mail-app-lan/spec.md).
+
+It needs the hardened LAN setup above on the Mac mini. In LAN mode the model stays loaded, so the Mac mini uses about as much memory as when the service is busy.
+
+### On the Mac mini, once
+
+1. **If you used local mode until now**, keep what it learned: set `backup.ageRecipient` in `~/.catrec/config.yaml` to your public age key, stop `run-local.sh`, and take a backup.
+
+   ```bash
+   cd service && npm run build && CATREC_CONFIG=~/.catrec/config.yaml node dist/src/cli/index.js backup ~/catrec-local.age
+   ```
+
+2. **Install the hardened LAN setup** ([Install from scratch](#install-from-scratch)), with `--dns` in the PKI step. Do the list below for the Mac mini's own Mail app first: installed for local mode, it would try to start local mode, whose ports the LAN setup now uses.
+3. **Restore the backup** into it, as in [Backup and restore](#backup-and-restore-fr-021). Everything you taught it belongs to the user `owner`, and so do your devices in `access.devices`, so it stays yours.
+4. **Energy**: in System Settings > Energy, turn on **Prevent automatic sleeping when the display is off** and **Wake for network access**, or:
+
+   ```bash
+   sudo pmset -a sleep 0 womp 1
+   ```
+
+5. **FileVault and restarts**: after a restart, nothing starts until the Mac mini's FileVault password is entered on it, the recommender included. For a planned restart, `sudo fdesetup authrestart` unlocks it once.
+
+### For each Mac, the Mac mini included
+
+1. On the Mac mini, issue the Mac a device certificate:
+
+   ```bash
+   sudo -u catrec scripts/pki/new-device.sh krisz-macbook
+   ```
+
+2. On the Mac mini, paste the printed entry into `access.devices` in the config.
+3. Copy `devices/krisz-macbook.p12` and `ca.crt` (never `ca.key`) to the Mac, with AirDrop or a USB stick.
+4. On the Mac, open the `.p12` in Finder and enter its password. It goes into the login keychain.
+5. On the Mac, install the Mail app for the Mac mini:
+
+   ```bash
+   mail-app/scripts/install.sh --remote https://krisz-mac-mini.local:8443 --ca ~/Downloads/ca.crt --device krisz-macbook --name "Mac mini"
+   ```
+
+6. On the Mac, check the connection. Allow Local Network access, and the keychain's request to use the device certificate (**Always Allow**), when macOS asks.
+
+   ```bash
+   open -n "$HOME/Applications/Category Recommender.app" --args --self-test-remote --out /tmp/catrec-remote.json
+   ```
+
+   Expect `"ok": true` in `/tmp/catrec-remote.json`. A failed step has a hint. The report has no address and no content.
+
+The installer copies `ca.crt` to `~/Library/Application Support/Category Recommender/` and never reads or imports a `.p12` or a key. On that Mac, the app never starts a service: neither `node` nor `llama-server` is needed there. To go back to the recommender on that Mac, run `mail-app/scripts/install.sh` without options.
+
+**Revoke a Mac**: delete its entry from `access.devices`. From the next request, its Mail app says the Mac mini does not accept it.
+
+**Away from home**, the app says the Mac mini can't be reached. You can still file emails by hand, but those decisions are not learned, and nothing is queued for later. Reaching it from outside the home network would need a WireGuard overlay, which is not part of this setup.
 
 ## Egress check (constitution I)
 

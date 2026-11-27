@@ -4,6 +4,19 @@ import Testing
 @testable import MailCore
 
 final class FakeMail: MailSource, @unchecked Sendable {
+    /// A batch of these emails, ids m1, m2, … in this order (newest first).
+    func opening(_ emails: [Email], total: Int? = nil) -> MailOpening {
+        let refs = emails.enumerated().map { i, email in
+            MailMessageRef(
+                id: i + 1, mailbox: "[Gmail]/All Mail", account: "Google", date: Double(100 - i),
+                messageId: "m\(i + 1)", from: email.from, subject: email.subject)
+        }
+        for (ref, email) in zip(refs, emails) { self.emails[ref.messageId!] = email }
+        return MailOpening(
+            selection: MailSelection(total: total ?? emails.count, messages: refs, latest: nil),
+            accounts: accounts, labels: AccountLabels(mailboxes: mailboxes), viewed: ["INBOX"])
+    }
+
     var selectionResult = MailSelection(
         messages: [MailMessageRef(id: 1, mailbox: "INBOX", account: "Google", messageId: "m1@example.test")],
         latest: Email(from: "Dad <dad@example.test>", subject: "Sunday lunch", body: "See you at noon"))
